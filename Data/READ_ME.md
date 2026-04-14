@@ -91,7 +91,8 @@ $$P_{ij} = \frac{U_{ij}}{\sum_{k=1}^n U_{ik}}$$
 
 
 ### **Development Guidelines:**
-* **Parameter Selection:** Your backend should query this file (or an equivalent SQL table) based on the `top_category` or `NAICS code` associated with the user's business.
+* **Parameter Selection and Category Match:** Query the `ModelParameters` table using the `top_category` or `NAICS code` associated with the user's business. Your backend should query this file (or an equivalent SQL table) based on the `top_category` or `NAICS code`of the user's business.
+* **Predictive Simulation:** Apply the corresponding Alpha and Beta to calculate the neighborhood-level capture rates ($P_{ij}$).
 * **Fallback Strategy:** If a user selects a business category not found in this file, the system should default to **Alpha = 1.0** and **Beta = 1.0** (Neutral Gravity).
 * **Data Quality Warning:** If a selected category has a correlation near 0.25, the AI should advise the user that the "Size and Distance" factors are moderately predictive, but other factors (like brand power) may apply.
 * **Fallback:** If no match is found, revert to the "Neutral Gravity" baseline ($\alpha=1.0, \beta=1.0$).
