@@ -22,4 +22,5 @@ $$P_{ij} = \frac{U_{ij}}{\sum_{j' \in J}U_{ij'}}$$
 *   **Attractiveness:** The original model primarily relies on the **floor area** of a facility to determine its attractiveness.
 *   **Distance:** The **Euclidean distance** between the customer base and the store location is typically used as an approximation of proximity.
 
+## References
 For more detailed information, please refer to the papers available in this folder.
