@@ -5,7 +5,7 @@ This repository provides:
 * the baseline Azure infrastructure for the Conversational AI deployment
 
 Stable infrastructure release:
-**TBD**
+TBD
 
 Student Teams must sync to this version before continuing development.
 
