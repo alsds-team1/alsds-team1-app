@@ -30,7 +30,7 @@ window.onMapLocationSelected = function (location) {
   if (state.step === "location") {
     addBotMessage(
       `Great, I captured the candidate location: ${location.lat.toFixed(6)}, ${location.lon.toFixed(6)}. ` +
-      "Now enter the proposed store floor area."
+      "Now enter the proposed store floor area in square meters."
     );
     state.step = "floor_area";
   }
@@ -45,11 +45,19 @@ async function handleSend() {
 
   try {
     if (state.step === "category") {
-      state.business_category = text;
+      const naicsCode = text.trim();
+      
+      if (!/^\d+$/.test(naicsCode)) {
+        addBotMessage("Please enter a numeric NAICS code. For example: 4441.");
+        return;
+      }
+    
+      state.business_category = naicsCode;
       state.step = "location";
+      
       addBotMessage(
         "Good. Now click the proposed store location on the map. " +
-        "You can also type coordinates as: 42.2626, -71.8023"
+        "You can also type coordinates as: 42.24, -71.78"
       );
       return;
     }
@@ -58,7 +66,7 @@ async function handleSend() {
       const coords = parseCoordinates(text);
 
       if (!coords) {
-        addBotMessage("Please click the map or type coordinates in this format: 42.2626, -71.8023");
+        addBotMessage("Please click the map or type coordinates in this format: 42.24, -71.78");
         return;
       }
 
@@ -70,7 +78,7 @@ async function handleSend() {
       }
 
       state.step = "floor_area";
-      addBotMessage("Great. Now enter the proposed store floor area.");
+      addBotMessage("Great. Now enter the proposed store floor area in square meters.");
       return;
     }
 
@@ -78,7 +86,7 @@ async function handleSend() {
       const area = Number(text.replace(/,/g, ""));
 
       if (!Number.isFinite(area) || area <= 0) {
-        addBotMessage("Please enter a positive numeric floor area, such as 2500.");
+        addBotMessage("Please enter a positive numeric floor area, such as 1000.");
         return;
       }
 
