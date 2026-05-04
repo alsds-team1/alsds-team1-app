@@ -3,8 +3,6 @@ from flask import Flask, request, jsonify, render_template
 from openai import AzureOpenAI
 
 from db import test_connection
-from huff_engine import run_huff_model
-
 
 app = Flask(__name__)
 
@@ -51,6 +49,8 @@ def dbcheck():
 @app.route("/api/run_huff", methods=["POST"])
 def api_run_huff():
     try:
+        from huff_engine import run_huff_model
+
         data = request.get_json()
 
         candidate_lat = data.get("candidate_lat")
