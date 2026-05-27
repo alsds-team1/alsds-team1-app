@@ -198,6 +198,35 @@ Do not invent data.
 # -------------------------
 # Run locally
 # -------------------------
+@app.route("/db_structure")
+def db_structure():
+    """Return all Azure SQL user tables with row counts for assignment verification."""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    t.name AS table_name,
+                    SUM(p.rows) AS row_count
+                FROM sys.tables AS t
+                INNER JOIN sys.partitions AS p
+                    ON t.object_id = p.object_id
+                WHERE p.index_id IN (0, 1)
+                GROUP BY t.name
+                ORDER BY t.name
+                """
+            )
+            rows = cursor.fetchall()
 
+        return jsonify({
+            "ok": True,
+            "tables": [
+                {"table_name": row[0], "row_count": int(row[1])}
+                for row in rows
+            ]
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
