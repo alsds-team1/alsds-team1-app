@@ -103,7 +103,7 @@ def build_tables() -> Tuple[pd.DataFrame, ...]:
     visits = pd.read_csv(VISITS_CSV, dtype={"visitor_home_cbg": str, "placekey": str})
     params = pd.read_csv(PARAMS_CSV, dtype={"NAICS code": str})
     cbg_geojson = load_cbg_geojson(CBGS_GEOJSON)
-
+print("CSV and GeoJSON files loaded successfully")
     cbg_master = cbgs.merge(cbg_geojson[["cbg", "latitude", "longitude"]], on="cbg", how="left")
 
     transformer = Transformer.from_crs("EPSG:4326", "EPSG:26919", always_xy=True)
@@ -113,7 +113,7 @@ def build_tables() -> Tuple[pd.DataFrame, ...]:
     )
     cbg_master["x_26919"] = x_coords
     cbg_master["y_26919"] = y_coords
-
+print("Coordinate transformation completed")
     category_parameters = params.rename(columns={"NAICS code": "naics_code"}).copy()
     category_parameters["naics_code"] = category_parameters["naics_code"].astype(str)
 
