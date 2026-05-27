@@ -12,5 +12,5 @@ ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-
+python migrate_to_azure_sql.py || echo "Migration failed"
 exec gunicorn --bind=0.0.0.0:${PORT:-8000} app:app
