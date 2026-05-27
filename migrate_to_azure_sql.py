@@ -21,24 +21,19 @@ from pyproj import Transformer
 
 from db import get_connection
 
+# Base directory
 BASE_DIR = Path(__file__).resolve().parent
 
+# Data folder
+DATA_DIR = BASE_DIR / "Data"
 
-def find_file(*names: str) -> Path:
-    for name in names:
-        path = BASE_DIR / name
-        if path.exists():
-            return path
-    raise FileNotFoundError(f"Could not find any of these files: {names}")
-
-
-CBGS_CSV = find_file("worcester_cbgs.csv", "worcester_cbgs(1).csv")
-POIS_CSV = find_file("worcester_pois.csv", "worcester_pois(1).csv")
-DISTANCE_CSV = find_file("worcester_cbg_poi_distance.csv", "worcester_cbg_poi_distance(1).csv")
-VISITS_CSV = find_file("worcester_cbg_poi_visits.csv", "worcester_cbg_poi_visits(1).csv")
-PARAMS_CSV = find_file("calibrated_parameters_filtered.csv", "calibrated_parameters_filtered(1).csv")
-CBGS_GEOJSON = find_file("worcester_cbgs_map.geojson", "worcester_cbgs_map(1).geojson")
-
+# File paths
+CBGS_CSV = DATA_DIR / "worcester_cbgs.csv"
+POIS_CSV = DATA_DIR / "worcester_pois.csv"
+DISTANCE_CSV = DATA_DIR / "worcester_cbg_poi_distance.csv"
+VISITS_CSV = DATA_DIR / "worcester_cbg_poi_visits.csv"
+PARAMS_CSV = DATA_DIR / "calibrated_parameters_filtered.csv"
+CBGS_GEOJSON = DATA_DIR / "worcester_cbgs_map.geojson"
 
 def load_cbg_geojson(path: Path) -> pd.DataFrame:
     """Store every GeoJSON feature as a row, including the full geometry JSON."""
