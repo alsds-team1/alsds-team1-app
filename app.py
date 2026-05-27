@@ -3,7 +3,6 @@ from flask import Flask, request, jsonify, render_template
 from openai import AzureOpenAI
 
 from db import get_connection, test_connection
-from migrate_to_azure_sql import migrate
 app = Flask(__name__)
 
 
@@ -193,13 +192,9 @@ Do not invent data.
     )
 
     return response.choices[0].message.content
-# -------------------------
-# Auto Migration
-# -------------------------
 
 # -------------------------
 # Run locally
 # -------------------------
 if __name__ == "__main__":
-    migrate()
     app.run(host="0.0.0.0", port=8000, debug=True)
