@@ -40,15 +40,47 @@ def sanitize_value(value):
     return value
 
 
-def insert_dataframe(conn, table_name: str, df: pd.DataFrame, columns: List[str]) -> None:
+def insert_dataframe(conn, table_name: str, df: pd.DataFrame, columns: List[str], chunk_size: int = 50000) -> None:
+    """
+    Safely insert DataFrame data into Azure SQL in chunks to prevent memory overflow (OOM).
+    :param chunk_size: Number of rows to process and insert per batch. Adjust based on server memory.
+    """
+    if df.empty:
+        return
+
     placeholders = ", ".join(["?"] * len(columns))
     col_sql = ", ".join(f"[{c}]" for c in columns)
     sql = f"INSERT INTO {table_name} ({col_sql}) VALUES ({placeholders})"
-    rows = [tuple(sanitize_value(v) for v in row) for row in df[columns].itertuples(index=False, name=None)]
+    
     cursor = conn.cursor()
-    cursor.fast_executemany = True
-    if rows:
-        cursor.executemany(sql, rows)
+    # Enable fast_executemany to greatly boost bulk insert speed
+    cursor.fast_executemany = True 
+    
+    total_rows = len(df)
+    
+    # Use range to slice DataFrame by step
+    for start_idx in range(0, total_rows, chunk_size):
+        end_idx = min(start_idx + chunk_size, total_rows)
+        
+        # 1. Slice out the current small chunk of the DataFrame (e.g., 0 to 50000 rows)
+        chunk_df = df.iloc[start_idx:end_idx]
+        
+        # 2. Convert only this small chunk of data to a List; memory footprint remains strictly bounded
+        rows = [
+            tuple(sanitize_value(v) for v in row) 
+            for row in chunk_df[columns].itertuples(index=False, name=None)
+        ]
+        
+        # 3. Insert into database immediately
+        if rows:
+            try:
+                cursor.executemany(sql, rows)
+                logger.info("  -> [%s] Successfully inserted rows %d to %d", table_name, start_idx + 1, end_idx)
+            except Exception as e:
+                logger.exception("  -> [%s] Failed to insert rows %d to %d!", table_name, start_idx + 1, end_idx)
+                raise e # Raise exception to trigger outer rollback or error handling
+                
+    # Once all chunks for this DataFrame are successfully inserted, commit the transaction
     conn.commit()
 
 
