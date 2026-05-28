@@ -123,48 +123,53 @@ def build_tables() -> Tuple[dict, pd.DataFrame]:
     return dfs, migration_summary
 
 
-def migrate() -> None:
-    dfs, migration_summary = build_tables()
+def migrate() -> dict:
+    try:
+        dfs, migration_summary = build_tables()
 
-    logger.info("Connecting to Azure SQL...")
-    with get_connection() as conn:
-        # Drop existing tables (we'll drop only the ones present in the sqlite db)
-        drop_statements = [f"DROP TABLE IF EXISTS {t}" for t in dfs.keys()] + ["DROP TABLE IF EXISTS migration_summary"]
-        logger.info("Dropping old tables if they exist: %s", list(dfs.keys()))
-        execute_statements(conn, drop_statements)
+        logger.info("Connecting to Azure SQL...")
+        with get_connection() as conn:
+            # Drop existing tables (we'll drop only the ones present in the sqlite db)
+            drop_statements = [f"DROP TABLE IF EXISTS {t}" for t in dfs.keys()] + ["DROP TABLE IF EXISTS migration_summary"]
+            logger.info("Dropping old tables if they exist: %s", list(dfs.keys()))
+            execute_statements(conn, drop_statements)
 
-        # Create tables inferred from DataFrame dtypes
-        create_statements = []
-        for table_name, df in dfs.items():
-            cols = []
-            for col in df.columns:
-                col_type = infer_azure_column_type(df[col])
-                # allow NULLs for everything by default; primary keys are not inferred automatically
-                cols.append(f"[{col}] {col_type} NULL")
-            create_sql = f"CREATE TABLE {table_name} (" + ", ".join(cols) + ")"
-            create_statements.append(create_sql)
+            # Create tables inferred from DataFrame dtypes
+            create_statements = []
+            for table_name, df in dfs.items():
+                cols = []
+                for col in df.columns:
+                    col_type = infer_azure_column_type(df[col])
+                    # allow NULLs for everything by default; primary keys are not inferred automatically
+                    cols.append(f"[{col}] {col_type} NULL")
+                create_sql = f"CREATE TABLE {table_name} (" + ", ".join(cols) + ")"
+                create_statements.append(create_sql)
 
-        # Always create migration_summary table
-        create_statements.append(
-            "CREATE TABLE migration_summary (table_name NVARCHAR(100) NOT NULL, row_count INT NOT NULL)"
-        )
+            # Always create migration_summary table
+            create_statements.append(
+                "CREATE TABLE migration_summary (table_name NVARCHAR(100) NOT NULL, row_count INT NOT NULL)"
+            )
 
-        logger.info("Creating tables on Azure SQL: %s", list(dfs.keys()))
-        execute_statements(conn, create_statements)
+            logger.info("Creating tables on Azure SQL: %s", list(dfs.keys()))
+            execute_statements(conn, create_statements)
 
-        logger.info("Uploading data to Azure SQL...")
-        for table_name, df in dfs.items():
-            if df.empty:
-                logger.info("Skipping empty table: %s", table_name)
-                continue
-            logger.info("Inserting %d rows into %s", len(df), table_name)
-            insert_dataframe(conn, table_name, df, list(df.columns))
+            logger.info("Uploading data to Azure SQL...")
+            for table_name, df in dfs.items():
+                if df.empty:
+                    logger.info("Skipping empty table: %s", table_name)
+                    continue
+                logger.info("Inserting %d rows into %s", len(df), table_name)
+                insert_dataframe(conn, table_name, df, list(df.columns))
 
-        # Insert migration summary
-        insert_dataframe(conn, "migration_summary", migration_summary, list(migration_summary.columns))
+            # Insert migration summary
+            insert_dataframe(conn, "migration_summary", migration_summary, list(migration_summary.columns))
 
-    logger.info("\nSUCCESS: Azure SQL migration completed.")
-    logger.info('\n' + migration_summary.to_string(index=False))
+        logger.info("\nSUCCESS: Azure SQL migration completed.")
+        logger.info('\n' + migration_summary.to_string(index=False))
+        return {"ok": True, "migration_summary": migration_summary.to_dict(orient="records")}
+    except Exception as e:
+        logger.exception("Migration failed: %s", e)
+        return {"ok": False, "error": str(e)}
 
 
 if __name__ == "__main__":
