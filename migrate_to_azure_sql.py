@@ -194,10 +194,24 @@ def migrate() -> dict:
             }
 
             logger.info("Uploading data to Azure SQL using per-row insert statements...")
+            cursor = conn.cursor()
             for tbl, cols in table_inserts.items():
                 df = dfs.get(tbl)
                 if df is None or df.empty:
                     logger.info("No data for table %s, skipping", tbl)
+                    continue
+
+                # check if target already has data; if so skip to avoid duplicate inserts
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM [dbo].[{tbl}]")
+                    existing = cursor.fetchone()[0] or 0
+                except Exception:
+                    # if the table doesn't exist or count fails, log and proceed to insert
+                    logger.exception("Failed to count rows in target table %s; will attempt insert", tbl)
+                    existing = 0
+
+                if existing > 0:
+                    logger.info("Target table %s already has %d rows — skipping insert", tbl, existing)
                     continue
 
                 logger.info("Inserting %d rows into %s (chunked)", len(df), tbl)
