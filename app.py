@@ -3,6 +3,7 @@ import json
 from flask import Flask, request, jsonify, render_template
 from openai import AzureOpenAI
 from migrate_to_azure_sql import migrate
+from huff_engine import predict_site
 
 from db import get_connection, test_connection
 app = Flask(__name__)
@@ -134,11 +135,11 @@ def api_run_huff():
         if None in [candidate_lat, candidate_lon, business_category, floor_area]:
             return jsonify({"ok": False, "error": "Missing required inputs"}), 400
 
-        result = run_huff_model(
+        result = predict_site(
             candidate_lat=candidate_lat,
             candidate_lon=candidate_lon,
             business_category=business_category,
-            floor_area=floor_area,
+            store_area_sq_m=floor_area,
         )
 
         explanation = generate_explanation(result)
