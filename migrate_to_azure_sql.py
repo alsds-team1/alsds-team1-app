@@ -11,9 +11,9 @@ Run locally after setting SQL_CONNECTION_STRING:
     python migrate_to_azure_sql.py
 """
 
-import json
 from pathlib import Path
 from typing import Iterable, List, Tuple
+import re
 
 import numpy as np
 import pandas as pd
@@ -161,45 +161,51 @@ def migrate() -> dict:
 
         logger.info("Connecting to Azure SQL...")
         with get_connection() as conn:
-            # Drop existing tables (we'll drop only the ones present in the sqlite db)
-            # use schema-qualified names and bracket-identifiers to be safe
-            drop_statements = [f"DROP TABLE IF EXISTS [dbo].[{t}]" for t in dfs.keys()] + ["DROP TABLE IF EXISTS [dbo].[migration_summary]"]
-            logger.info("Dropping old tables if they exist: %s", list(dfs.keys()))
-            execute_statements(conn, drop_statements)
 
-            # Create tables inferred from DataFrame dtypes
-            create_statements = []
-            for table_name, df in dfs.items():
-                cols = []
-                for col in df.columns:
-                    col_type = infer_azure_column_type(df[col])
-                    # allow NULLs for everything by default; primary keys are not inferred automatically
-                    cols.append(f"[{col}] {col_type} NULL")
-                # create table only if it does not exist
-                create_sql = (
-                    f"IF OBJECT_ID(N'[dbo].[{table_name}]', N'U') IS NULL "
-                    f"BEGIN CREATE TABLE [dbo].[{table_name}] (" + ", ".join(cols) + ") END"
-                )
-                create_statements.append(create_sql)
+            # Read and execute create_tables.sql directly (split by GO if present)
+            sql_file = BASE_DIR / "sql" / "create_tables.sql"
+            if not sql_file.exists():
+                raise FileNotFoundError(f"create_tables.sql not found: {sql_file}")
 
-            # Always create migration_summary table
-            create_statements.append(
-                "IF OBJECT_ID(N'[dbo].[migration_summary]', N'U') IS NULL BEGIN CREATE TABLE [dbo].[migration_summary] (table_name NVARCHAR(100) NOT NULL, row_count INT NOT NULL) END"
-            )
+            raw_sql = sql_file.read_text(encoding="utf-8")
 
-            logger.info("Creating tables on Azure SQL: %s", list(dfs.keys()))
-            execute_statements(conn, create_statements)
+            # Split script into batches by lines containing only GO (case-insensitive)
+            batches = [b.strip() for b in re.split(r'(?mi)^\s*GO\s*$', raw_sql) if b.strip()]
+            logger.info("Executing %d SQL batches from %s", len(batches), sql_file)
+            try:
+                execute_statements(conn, batches)
+            except Exception:
+                logger.exception("Failed to execute create_tables.sql")
+                raise
 
-            logger.info("Uploading data to Azure SQL...")
-            for table_name, df in dfs.items():
-                if df.empty:
-                    logger.info("Skipping empty table: %s", table_name)
+            # Hardcoded table insertion order and column names (must match create_tables.sql)
+            table_inserts = {
+                "cbg_master": [
+                    "geoid", "total_population", "median_household_income", "median_age",
+                    "white_population", "black_population", "asian_population", "hispanic_population",
+                    "uni_degree", "income_q", "education_q", "age_q", "latitude", "longitude", "x_26919", "y_26919"
+                ],
+                "pois": ["placekey", "location_name", "top_category", "sub_category", "naics_code", "latitude", "longitude", "poi_cbg", "wkt_area_sq_meters"],
+                "cbg_poi_distance": ["placekey", "geoid", "distance_m"],
+                "cbg_poi_visits": ["geoid", "placekey", "visit_count"],
+                "category_parameters": ["top_category", "naics_code", "alpha", "beta", "correlation"],
+                "Competitor_Summary": ["geoid", "top_category", "total_u_existing"],
+                "category_demand": ["geoid", "top_category", "total_category_visits"],
+            }
+
+            logger.info("Uploading data to Azure SQL using per-row insert statements...")
+            for tbl, cols in table_inserts.items():
+                df = dfs.get(tbl)
+                if df is None or df.empty:
+                    logger.info("No data for table %s, skipping", tbl)
                     continue
-                logger.info("Inserting %d rows into %s", len(df), table_name)
-                insert_dataframe(conn, f"[dbo].[{table_name}]", df, list(df.columns))
 
-            # Insert migration summary into schema-qualified table
-            insert_dataframe(conn, "[dbo].[migration_summary]", migration_summary, list(migration_summary.columns))
+                logger.info("Inserting %d rows into %s (chunked)", len(df), tbl)
+                try:
+                    insert_dataframe(conn, f"[dbo].[{tbl}]", df, cols, chunk_size=5000)
+                except Exception:
+                    logger.exception("Failed to insert chunked rows into %s", tbl)
+                    raise
 
         logger.info("\nSUCCESS: Azure SQL migration completed.")
         logger.info('\n' + migration_summary.to_string(index=False))
