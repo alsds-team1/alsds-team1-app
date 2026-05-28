@@ -18,6 +18,7 @@ from typing import Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 from pyproj import Transformer
+import sqlite3
 
 from db import get_connection
 import logging
@@ -29,46 +30,6 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # Data folder
 DATA_DIR = BASE_DIR / "Data"
-
-# File paths
-CBGS_CSV = DATA_DIR / "worcester_cbgs.csv"
-POIS_CSV = DATA_DIR / "worcester_pois.csv"
-DISTANCE_CSV = DATA_DIR / "worcester_cbg_poi_distance.csv"
-VISITS_CSV = DATA_DIR / "worcester_cbg_poi_visits.csv"
-PARAMS_CSV = DATA_DIR / "calibrated_parameters_filtered.csv"
-CBGS_GEOJSON = DATA_DIR / "worcester_cbgs_map.geojson"
-
-def load_cbg_geojson(path: Path) -> pd.DataFrame:
-    """Store every GeoJSON feature as a row, including the full geometry JSON."""
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    rows = []
-    for feature in data.get("features", []):
-        props = feature.get("properties", {}) or {}
-        geometry = feature.get("geometry", {}) or {}
-        geoid = props.get("GEOID10")
-        if geoid is None:
-            continue
-        rows.append(
-            {
-                "cbg": str(geoid),
-                "statefp10": str(props.get("STATEFP10", "")),
-                "countyfp10": str(props.get("COUNTYFP10", "")),
-                "tractce10": str(props.get("TRACTCE10", "")),
-                "blkgrpce10": str(props.get("BLKGRPCE10", "")),
-                "namelsad10": str(props.get("NAMELSAD10", "")),
-                "aland10": props.get("ALAND10"),
-                "awater10": props.get("AWATER10"),
-                "latitude": float(props.get("INTPTLAT10")) if props.get("INTPTLAT10") is not None else None,
-                "longitude": float(props.get("INTPTLON10")) if props.get("INTPTLON10") is not None else None,
-                "geometry_type": str(geometry.get("type", "")),
-                "properties_json": json.dumps(props),
-                "geometry_json": json.dumps(geometry),
-                "feature_json": json.dumps(feature),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def sanitize_value(value):
@@ -109,280 +70,98 @@ def execute_statements(conn, statements: Iterable[str]) -> None:
     conn.commit()
 
 
-def build_tables() -> Tuple[pd.DataFrame, ...]:
-    logger.info("Loading CSV and GeoJSON source files...")
-    cbgs = pd.read_csv(CBGS_CSV, dtype={"cbg": str})
-    pois = pd.read_csv(POIS_CSV, dtype={"placekey": str, "poi_cbg": str, "naics_code": str})
-    distances = pd.read_csv(DISTANCE_CSV, dtype={"placekey": str, "GEOID10": str})
-    visits = pd.read_csv(VISITS_CSV, dtype={"visitor_home_cbg": str, "placekey": str})
-    params = pd.read_csv(PARAMS_CSV, dtype={"NAICS code": str})
-    cbg_geojson = load_cbg_geojson(CBGS_GEOJSON)
+def load_sqlite_db(sqlite_path: Path) -> dict:
+    """Load all non-system tables from a local SQLite database and return a dict of DataFrames."""
+    logger.info("Loading local SQLite DB: %s", sqlite_path)
+    sqlite_conn = sqlite3.connect(str(sqlite_path))
+    cursor = sqlite_conn.cursor()
+    # fetch user tables
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+    tables = [row[0] for row in cursor.fetchall()]
+    dfs = {}
+    for t in tables:
+        logger.info("Reading table from sqlite: %s", t)
+        try:
+            df = pd.read_sql_query(f'SELECT * FROM "{t}"', sqlite_conn)
+        except Exception:
+            logger.exception("Failed to read table %s from sqlite", t)
+            raise
+        dfs[t] = df
+    sqlite_conn.close()
+    return dfs
 
-    cbg_master = cbgs.merge(cbg_geojson[["cbg", "latitude", "longitude"]], on="cbg", how="left")
 
-    transformer = Transformer.from_crs("EPSG:4326", "EPSG:26919", always_xy=True)
-    x_coords, y_coords = transformer.transform(
-        cbg_master["longitude"].astype(float).to_numpy(),
-        cbg_master["latitude"].astype(float).to_numpy(),
-    )
-    cbg_master["x_26919"] = x_coords
-    cbg_master["y_26919"] = y_coords
+def infer_azure_column_type(series: pd.Series) -> str:
+    """Infer a simple Azure SQL column type from a pandas Series."""
+    dtype = series.dtype
+    if pd.api.types.is_integer_dtype(dtype):
+        return "INT"
+    if pd.api.types.is_float_dtype(dtype):
+        return "FLOAT"
+    if pd.api.types.is_bool_dtype(dtype):
+        return "BIT"
+    if pd.api.types.is_datetime64_any_dtype(dtype):
+        return "DATETIME"
+    # default to NVARCHAR(MAX) for objects/strings
+    return "NVARCHAR(MAX)"
 
-    category_parameters = params.rename(columns={"NAICS code": "naics_code"}).copy()
-    category_parameters["naics_code"] = category_parameters["naics_code"].astype(str)
 
-    pois_clean = pois[
-        [
-            "placekey",
-            "location_name",
-            "brands",
-            "top_category",
-            "sub_category",
-            "category_tags",
-            "naics_code",
-            "latitude",
-            "longitude",
-            "poi_cbg",
-            "street_address",
-            "city",
-            "region",
-            "postal_code",
-            "open_hours",
-            "wkt_area_sq_meters",
-            "polygon_wkt",
-        ]
-    ].copy()
-    pois_clean["wkt_area_sq_meters"] = pois_clean["wkt_area_sq_meters"].fillna(1).clip(lower=1)
-
-    distances_clean = distances.rename(columns={"GEOID10": "cbg"}).copy()
-    distances_clean["distance_m"] = distances_clean["distance_m"].fillna(0.1).clip(lower=0.1)
-
-    visits_clean = visits.copy()
-
-    logger.info("Precomputing competitor utility and demand summaries...")
-    comp_base = (
-        distances_clean.merge(
-            pois_clean[["placekey", "top_category", "wkt_area_sq_meters"]], on="placekey", how="left"
-        ).merge(category_parameters[["top_category", "alpha", "beta"]], on="top_category", how="inner")
-    )
-    comp_base["u_existing"] = np.power(comp_base["wkt_area_sq_meters"], comp_base["alpha"]) / np.power(
-        comp_base["distance_m"], comp_base["beta"]
-    )
-    competitor_utility = (
-        comp_base.groupby(["cbg", "top_category"], as_index=False)["u_existing"]
-        .sum()
-        .rename(columns={"u_existing": "total_u_existing"})
-    )
-
-    category_demand = (
-        visits_clean.merge(pois_clean[["placekey", "top_category"]], on="placekey", how="left")
-        .groupby(["visitor_home_cbg", "top_category"], as_index=False)["visit_count"]
-        .sum()
-        .rename(columns={"visitor_home_cbg": "cbg", "visit_count": "total_category_visits"})
-    )
+def build_tables() -> Tuple[dict, pd.DataFrame]:
+    """Load all tables from Data/team1.db and return dict of DataFrames and a migration summary DataFrame."""
+    TEAM1_DB = DATA_DIR / "team1.db"
+    if not TEAM1_DB.exists():
+        raise FileNotFoundError(f"Local sqlite DB not found: {TEAM1_DB}")
+    dfs = load_sqlite_db(TEAM1_DB)
 
     migration_summary = pd.DataFrame(
         {
-            "table_name": [
-                "cbg_master",
-                "cbg_geojson",
-                "pois",
-                "cbg_poi_distance",
-                "cbg_poi_visits",
-                "category_parameters",
-                "competitor_utility",
-                "category_demand",
-            ],
-            "row_count": [
-                len(cbg_master),
-                len(cbg_geojson),
-                len(pois_clean),
-                len(distances_clean),
-                len(visits_clean),
-                len(category_parameters),
-                len(competitor_utility),
-                len(category_demand),
-            ],
+            "table_name": list(dfs.keys()),
+            "row_count": [len(df) for df in dfs.values()],
         }
     )
 
-    return (
-        cbg_master,
-        cbg_geojson,
-        pois_clean,
-        distances_clean,
-        visits_clean,
-        category_parameters,
-        competitor_utility,
-        category_demand,
-        migration_summary,
-    )
+    return dfs, migration_summary
 
 
 def migrate() -> None:
-    (
-        cbg_master,
-        cbg_geojson,
-        pois_clean,
-        distances_clean,
-        visits_clean,
-        category_parameters,
-        competitor_utility,
-        category_demand,
-        migration_summary,
-    ) = build_tables()
+    dfs, migration_summary = build_tables()
 
     logger.info("Connecting to Azure SQL...")
     with get_connection() as conn:
-        logger.info("Dropping old tables if they exist...")
-        execute_statements(
-            conn,
-            [
-                "DROP TABLE IF EXISTS migration_summary",
-                "DROP TABLE IF EXISTS category_demand",
-                "DROP TABLE IF EXISTS competitor_utility",
-                "DROP TABLE IF EXISTS category_parameters",
-                "DROP TABLE IF EXISTS cbg_poi_visits",
-                "DROP TABLE IF EXISTS cbg_poi_distance",
-                "DROP TABLE IF EXISTS pois",
-                "DROP TABLE IF EXISTS cbg_geojson",
-                "DROP TABLE IF EXISTS cbg_master",
-            ],
+        # Drop existing tables (we'll drop only the ones present in the sqlite db)
+        drop_statements = [f"DROP TABLE IF EXISTS {t}" for t in dfs.keys()] + ["DROP TABLE IF EXISTS migration_summary"]
+        logger.info("Dropping old tables if they exist: %s", list(dfs.keys()))
+        execute_statements(conn, drop_statements)
+
+        # Create tables inferred from DataFrame dtypes
+        create_statements = []
+        for table_name, df in dfs.items():
+            cols = []
+            for col in df.columns:
+                col_type = infer_azure_column_type(df[col])
+                # allow NULLs for everything by default; primary keys are not inferred automatically
+                cols.append(f"[{col}] {col_type} NULL")
+            create_sql = f"CREATE TABLE {table_name} (" + ", ".join(cols) + ")"
+            create_statements.append(create_sql)
+
+        # Always create migration_summary table
+        create_statements.append(
+            "CREATE TABLE migration_summary (table_name NVARCHAR(100) NOT NULL, row_count INT NOT NULL)"
         )
 
-        logger.info("Creating Azure SQL tables...")
-        execute_statements(
-            conn,
-            [
-                """
-                CREATE TABLE cbg_master (
-                    cbg NVARCHAR(20) NOT NULL PRIMARY KEY,
-                    total_population INT NULL,
-                    median_household_income FLOAT NULL,
-                    median_age FLOAT NULL,
-                    white_population FLOAT NULL,
-                    black_population FLOAT NULL,
-                    asian_population FLOAT NULL,
-                    hispanic_population FLOAT NULL,
-                    uni_degree FLOAT NULL,
-                    income_q NVARCHAR(20) NULL,
-                    education_q NVARCHAR(20) NULL,
-                    age_q NVARCHAR(20) NULL,
-                    latitude FLOAT NULL,
-                    longitude FLOAT NULL,
-                    x_26919 FLOAT NULL,
-                    y_26919 FLOAT NULL
-                )
-                """,
-                """
-                CREATE TABLE cbg_geojson (
-                    cbg NVARCHAR(20) NOT NULL PRIMARY KEY,
-                    statefp10 NVARCHAR(10) NULL,
-                    countyfp10 NVARCHAR(10) NULL,
-                    tractce10 NVARCHAR(20) NULL,
-                    blkgrpce10 NVARCHAR(10) NULL,
-                    namelsad10 NVARCHAR(100) NULL,
-                    aland10 FLOAT NULL,
-                    awater10 FLOAT NULL,
-                    latitude FLOAT NULL,
-                    longitude FLOAT NULL,
-                    geometry_type NVARCHAR(50) NULL,
-                    properties_json NVARCHAR(MAX) NULL,
-                    geometry_json NVARCHAR(MAX) NULL,
-                    feature_json NVARCHAR(MAX) NULL
-                )
-                """,
-                """
-                CREATE TABLE pois (
-                    placekey NVARCHAR(100) NOT NULL PRIMARY KEY,
-                    location_name NVARCHAR(255) NULL,
-                    brands NVARCHAR(MAX) NULL,
-                    top_category NVARCHAR(255) NULL,
-                    sub_category NVARCHAR(255) NULL,
-                    category_tags NVARCHAR(MAX) NULL,
-                    naics_code NVARCHAR(50) NULL,
-                    latitude FLOAT NULL,
-                    longitude FLOAT NULL,
-                    poi_cbg NVARCHAR(20) NULL,
-                    street_address NVARCHAR(255) NULL,
-                    city NVARCHAR(100) NULL,
-                    region NVARCHAR(20) NULL,
-                    postal_code NVARCHAR(20) NULL,
-                    open_hours NVARCHAR(MAX) NULL,
-                    wkt_area_sq_meters FLOAT NULL,
-                    polygon_wkt NVARCHAR(MAX) NULL
-                )
-                """,
-                """
-                CREATE TABLE cbg_poi_distance (
-                    placekey NVARCHAR(100) NOT NULL,
-                    cbg NVARCHAR(20) NOT NULL,
-                    distance_m FLOAT NULL
-                )
-                """,
-                """
-                CREATE TABLE cbg_poi_visits (
-                    visitor_home_cbg NVARCHAR(20) NOT NULL,
-                    placekey NVARCHAR(100) NOT NULL,
-                    visit_count FLOAT NULL
-                )
-                """,
-                """
-                CREATE TABLE category_parameters (
-                    top_category NVARCHAR(255) NOT NULL,
-                    naics_code NVARCHAR(50) NULL,
-                    alpha FLOAT NULL,
-                    beta FLOAT NULL,
-                    correlation FLOAT NULL
-                )
-                """,
-                """
-                CREATE TABLE competitor_utility (
-                    cbg NVARCHAR(20) NOT NULL,
-                    top_category NVARCHAR(255) NOT NULL,
-                    total_u_existing FLOAT NULL
-                )
-                """,
-                """
-                CREATE TABLE category_demand (
-                    cbg NVARCHAR(20) NOT NULL,
-                    top_category NVARCHAR(255) NOT NULL,
-                    total_category_visits FLOAT NULL
-                )
-                """,
-                """
-                CREATE TABLE migration_summary (
-                    table_name NVARCHAR(100) NOT NULL,
-                    row_count INT NOT NULL
-                )
-                """,
-            ],
-        )
+        logger.info("Creating tables on Azure SQL: %s", list(dfs.keys()))
+        execute_statements(conn, create_statements)
 
-        logger.info("Inserting rows...")
-        insert_dataframe(conn, "cbg_master", cbg_master, list(cbg_master.columns))
-        insert_dataframe(conn, "cbg_geojson", cbg_geojson, list(cbg_geojson.columns))
-        insert_dataframe(conn, "pois", pois_clean, list(pois_clean.columns))
-        insert_dataframe(conn, "cbg_poi_distance", distances_clean, list(distances_clean.columns))
-        insert_dataframe(conn, "cbg_poi_visits", visits_clean, list(visits_clean.columns))
-        insert_dataframe(conn, "category_parameters", category_parameters, list(category_parameters.columns))
-        insert_dataframe(conn, "competitor_utility", competitor_utility, list(competitor_utility.columns))
-        insert_dataframe(conn, "category_demand", category_demand, list(category_demand.columns))
+        logger.info("Uploading data to Azure SQL...")
+        for table_name, df in dfs.items():
+            if df.empty:
+                logger.info("Skipping empty table: %s", table_name)
+                continue
+            logger.info("Inserting %d rows into %s", len(df), table_name)
+            insert_dataframe(conn, table_name, df, list(df.columns))
+
+        # Insert migration summary
         insert_dataframe(conn, "migration_summary", migration_summary, list(migration_summary.columns))
-
-        logger.info("Creating indexes...")
-        execute_statements(
-            conn,
-            [
-                "CREATE INDEX idx_pois_category ON pois(top_category)",
-                "CREATE INDEX idx_distance_cbg_placekey ON cbg_poi_distance(cbg, placekey)",
-                "CREATE INDEX idx_visits_home_placekey ON cbg_poi_visits(visitor_home_cbg, placekey)",
-                "CREATE INDEX idx_params_category ON category_parameters(top_category)",
-                "CREATE INDEX idx_params_naics ON category_parameters(naics_code)",
-                "CREATE INDEX idx_utility_cbg_category ON competitor_utility(cbg, top_category)",
-                "CREATE INDEX idx_demand_cbg_category ON category_demand(cbg, top_category)",
-            ],
-        )
 
     logger.info("\nSUCCESS: Azure SQL migration completed.")
     logger.info('\n' + migration_summary.to_string(index=False))
@@ -390,4 +169,4 @@ def migrate() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    migrate()
+    print(build_tables())
