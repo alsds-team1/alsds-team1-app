@@ -20,6 +20,9 @@ import pandas as pd
 from pyproj import Transformer
 
 from db import get_connection
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent
@@ -91,12 +94,23 @@ def insert_dataframe(conn, table_name: str, df: pd.DataFrame, columns: List[str]
 def execute_statements(conn, statements: Iterable[str]) -> None:
     cursor = conn.cursor()
     for statement in statements:
-        cursor.execute(statement)
+        try:
+            # Log the exact SQL statement being executed (trim long whitespace for readability)
+            if isinstance(statement, str):
+                stmt_preview = statement.strip()
+            else:
+                stmt_preview = str(statement)
+            logger.info("Executing SQL statement: %s", stmt_preview)
+            cursor.execute(statement)
+        except Exception:
+            # Log full exception with statement context and re-raise for caller to handle
+            logger.exception("Error executing SQL statement: %s", stmt_preview)
+            raise
     conn.commit()
 
 
 def build_tables() -> Tuple[pd.DataFrame, ...]:
-    print("Loading CSV and GeoJSON source files...")
+    logger.info("Loading CSV and GeoJSON source files...")
     cbgs = pd.read_csv(CBGS_CSV, dtype={"cbg": str})
     pois = pd.read_csv(POIS_CSV, dtype={"placekey": str, "poi_cbg": str, "naics_code": str})
     distances = pd.read_csv(DISTANCE_CSV, dtype={"placekey": str, "GEOID10": str})
@@ -145,7 +159,7 @@ print("Coordinate transformation completed")
 
     visits_clean = visits.copy()
 
-    print("Precomputing competitor utility and demand summaries...")
+    logger.info("Precomputing competitor utility and demand summaries...")
     comp_base = (
         distances_clean.merge(
             pois_clean[["placekey", "top_category", "wkt_area_sq_meters"]], on="placekey", how="left"
@@ -218,9 +232,9 @@ def migrate() -> None:
         migration_summary,
     ) = build_tables()
 
-    print("Connecting to Azure SQL...")
+    logger.info("Connecting to Azure SQL...")
     with get_connection() as conn:
-        print("Dropping old tables if they exist...")
+        logger.info("Dropping old tables if they exist...")
         execute_statements(
             conn,
             [
@@ -236,7 +250,7 @@ def migrate() -> None:
             ],
         )
 
-        print("Creating Azure SQL tables...")
+        logger.info("Creating Azure SQL tables...")
         execute_statements(
             conn,
             [
@@ -345,7 +359,7 @@ def migrate() -> None:
             ],
         )
 
-        print("Inserting rows...")
+        logger.info("Inserting rows...")
         insert_dataframe(conn, "cbg_master", cbg_master, list(cbg_master.columns))
         insert_dataframe(conn, "cbg_geojson", cbg_geojson, list(cbg_geojson.columns))
         insert_dataframe(conn, "pois", pois_clean, list(pois_clean.columns))
@@ -356,7 +370,7 @@ def migrate() -> None:
         insert_dataframe(conn, "category_demand", category_demand, list(category_demand.columns))
         insert_dataframe(conn, "migration_summary", migration_summary, list(migration_summary.columns))
 
-        print("Creating indexes...")
+        logger.info("Creating indexes...")
         execute_statements(
             conn,
             [
@@ -370,9 +384,10 @@ def migrate() -> None:
             ],
         )
 
-    print("\nSUCCESS: Azure SQL migration completed.")
-    print(migration_summary.to_string(index=False))
+    logger.info("\nSUCCESS: Azure SQL migration completed.")
+    logger.info('\n' + migration_summary.to_string(index=False))
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     migrate()

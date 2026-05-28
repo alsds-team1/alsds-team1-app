@@ -1,6 +1,7 @@
 import os
 from flask import Flask, request, jsonify, render_template
 from openai import AzureOpenAI
+from migrate_to_azure_sql import migrate
 
 from db import get_connection, test_connection
 app = Flask(__name__)
@@ -197,4 +198,5 @@ Do not invent data.
 # Run locally
 # -------------------------
 if __name__ == "__main__":
+    migrate()
     app.run(host="0.0.0.0", port=8000, debug=True)
