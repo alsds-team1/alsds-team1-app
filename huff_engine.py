@@ -134,7 +134,7 @@ def run_huff_model(
     details = result["details"]
 
     top_cbg_rows = details[
-        ["cbg", "total_category_visits", "total_u_existing", "new_dist_m", "p_new", "predicted_visits"]
+        ["geoid", "total_category_visits", "total_u_existing", "new_dist_m", "p_new", "predicted_visits"]
     ].head(10)
 
     # Give the LLM/frontend a small sample instead of the full DataFrame.
