@@ -72,18 +72,18 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
         cbg_data = pd.read_sql(
             """
             SELECT
-                c.cbg,
+                c.geoid,
                 c.total_population,
                 c.median_household_income,
                 c.x_26919,
                 c.y_26919,
-                COALESCE(u.total_u_existing, 0) AS total_u_existing,
+                COALESCE(s.total_u_existing,      0) AS total_u_existing,
                 COALESCE(d.total_category_visits, 0) AS total_category_visits
             FROM cbg_master AS c
-            LEFT JOIN competitor_utility AS u
-                ON c.cbg = u.cbg AND u.top_category = ?
+            LEFT JOIN Competitor_Summary AS s
+                ON c.geoid = s.geoid AND s.top_category = ?
             LEFT JOIN category_demand AS d
-                ON c.cbg = d.cbg AND d.top_category = ?
+                ON c.geoid = d.geoid AND d.top_category = ?
             """,
             conn,
             params=[matched_category, matched_category],
