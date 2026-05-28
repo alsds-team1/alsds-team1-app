@@ -1,4 +1,5 @@
 import os
+import json
 from flask import Flask, request, jsonify, render_template
 from openai import AzureOpenAI
 from migrate_to_azure_sql import migrate
@@ -43,12 +44,6 @@ def dbcheck():
 
 
 
-@app.route("/admin/migrate")
-def admin_migrate():
-    """Temporary endpoint to trigger DB migration. Requires ADMIN_MIGRATE_TOKEN env var to be set and provided in header 'X-Admin-Token'."""
-
-    result = migrate()
-    return jsonify(result)
 
 
 @app.route("/db_structure")
@@ -60,25 +55,62 @@ def db_structure():
             cursor.execute(
                 """
                 SELECT
+                    SCHEMA_NAME(t.schema_id) AS schema_name,
                     t.name AS table_name,
                     SUM(p.rows) AS row_count
                 FROM sys.tables AS t
                 INNER JOIN sys.partitions AS p
                     ON t.object_id = p.object_id
                 WHERE p.index_id IN (0, 1)
-                GROUP BY t.name
+                GROUP BY SCHEMA_NAME(t.schema_id), t.name
                 ORDER BY t.name
                 """
             )
             rows = cursor.fetchall()
 
-        return jsonify({
-            "ok": True,
-            "tables": [
-                {"table_name": row[0], "row_count": int(row[1])}
-                for row in rows
-            ]
-        })
+            # Build a single UNION ALL query that fetches up to 5 rows per table as JSON, then execute once
+            table_list = [(schema_name, table_name, int(row_count)) for schema_name, table_name, row_count in rows]
+            preview_selects = []
+            for schema_name, table_name, _ in table_list:
+                # ensure literals are safe in SQL string
+                s_schema = schema_name.replace("'", "''")
+                s_table = table_name.replace("'", "''")
+                preview_sql = (
+                    f"SELECT N'{s_schema}' AS schema_name, N'{s_table}' AS table_name, "
+                    f"ISNULL((SELECT TOP (5) * FROM [{s_schema}].[{s_table}] FOR JSON PATH), '[]') AS preview_json"
+                )
+                preview_selects.append(preview_sql)
+
+            tables = []
+            if preview_selects:
+                combined_sql = "\nUNION ALL\n".join(preview_selects)
+                try:
+                    cursor.execute(combined_sql)
+                    preview_rows = cursor.fetchall()
+                    # preview_rows: list of tuples (schema_name, table_name, preview_json)
+                    preview_map = { (r[0], r[1]): (r[2] or '[]') for r in preview_rows }
+                except Exception:
+                    app.logger.exception("Failed to fetch combined previews")
+                    preview_map = {}
+            else:
+                preview_map = {}
+
+            for schema_name, table_name, row_count in table_list:
+                pj = preview_map.get((schema_name, table_name), '[]')
+                try:
+                    preview = json.loads(pj)
+                except Exception:
+                    app.logger.exception("Failed to parse preview JSON for %s.%s", schema_name, table_name)
+                    preview = []
+
+                tables.append({
+                    "schema": schema_name,
+                    "table_name": table_name,
+                    "row_count": int(row_count),
+                    "preview": preview,
+                })
+
+        return jsonify({"ok": True, "tables": tables})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
