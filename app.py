@@ -42,6 +42,15 @@ def dbcheck():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+
+@app.route("/admin/migrate")
+def admin_migrate():
+    """Temporary endpoint to trigger DB migration. Requires ADMIN_MIGRATE_TOKEN env var to be set and provided in header 'X-Admin-Token'."""
+
+    result = migrate()
+    return jsonify(result)
+
+
 @app.route("/db_structure")
 def db_structure():
     """Return all Azure SQL user tables with row counts for assignment verification."""
