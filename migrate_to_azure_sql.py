@@ -130,7 +130,8 @@ def migrate() -> dict:
         logger.info("Connecting to Azure SQL...")
         with get_connection() as conn:
             # Drop existing tables (we'll drop only the ones present in the sqlite db)
-            drop_statements = [f"DROP TABLE IF EXISTS {t}" for t in dfs.keys()] + ["DROP TABLE IF EXISTS migration_summary"]
+            # use schema-qualified names and bracket-identifiers to be safe
+            drop_statements = [f"DROP TABLE IF EXISTS [dbo].[{t}]" for t in dfs.keys()] + ["DROP TABLE IF EXISTS [dbo].[migration_summary]"]
             logger.info("Dropping old tables if they exist: %s", list(dfs.keys()))
             execute_statements(conn, drop_statements)
 
@@ -142,12 +143,16 @@ def migrate() -> dict:
                     col_type = infer_azure_column_type(df[col])
                     # allow NULLs for everything by default; primary keys are not inferred automatically
                     cols.append(f"[{col}] {col_type} NULL")
-                create_sql = f"CREATE TABLE {table_name} (" + ", ".join(cols) + ")"
+                # create table only if it does not exist
+                create_sql = (
+                    f"IF OBJECT_ID(N'[dbo].[{table_name}]', N'U') IS NULL "
+                    f"BEGIN CREATE TABLE [dbo].[{table_name}] (" + ", ".join(cols) + ") END"
+                )
                 create_statements.append(create_sql)
 
             # Always create migration_summary table
             create_statements.append(
-                "CREATE TABLE migration_summary (table_name NVARCHAR(100) NOT NULL, row_count INT NOT NULL)"
+                "IF OBJECT_ID(N'[dbo].[migration_summary]', N'U') IS NULL BEGIN CREATE TABLE [dbo].[migration_summary] (table_name NVARCHAR(100) NOT NULL, row_count INT NOT NULL) END"
             )
 
             logger.info("Creating tables on Azure SQL: %s", list(dfs.keys()))
@@ -159,10 +164,10 @@ def migrate() -> dict:
                     logger.info("Skipping empty table: %s", table_name)
                     continue
                 logger.info("Inserting %d rows into %s", len(df), table_name)
-                insert_dataframe(conn, table_name, df, list(df.columns))
+                insert_dataframe(conn, f"[dbo].[{table_name}]", df, list(df.columns))
 
-            # Insert migration summary
-            insert_dataframe(conn, "migration_summary", migration_summary, list(migration_summary.columns))
+            # Insert migration summary into schema-qualified table
+            insert_dataframe(conn, "[dbo].[migration_summary]", migration_summary, list(migration_summary.columns))
 
         logger.info("\nSUCCESS: Azure SQL migration completed.")
         logger.info('\n' + migration_summary.to_string(index=False))
@@ -174,4 +179,6 @@ def migrate() -> dict:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    print(build_tables())
+    # run migration when invoked directly; print the result for convenience
+    result = migrate()
+    print(result)
