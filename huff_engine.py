@@ -16,21 +16,35 @@ from pyproj import Transformer
 from db import get_connection
 
 
-def _load_geoid_to_name_mapping(geojson_path: str = "Data/worcester_cbgs_map.geojson") -> Dict[str, str]:
-    """Load GeoJSON and create a mapping from GEOID10 to NAMELSAD10 (CBG name)."""
+def _load_geoid_to_name_mapping(geojson_path: str = "Data/worcester_cbgs_map.geojson") -> Dict[str, Dict[str, str]]:
+    """Load GeoJSON and create a mapping from GEOID10 to a small props dict.
+
+    The returned mapping value is a dict containing keys we may use for naming:
+    - 'name' : NAMELSAD10 if present
+    - 'tract': TRACTCE10 if present
+    - 'blk'  : BLKGRPCE10 if present
+    """
     try:
         with open(geojson_path, 'r', encoding='utf-8') as f:
             geojson_data = json.load(f)
-        
-        mapping = {}
+
+        mapping: Dict[str, Dict[str, str]] = {}
         for feature in geojson_data.get("features", []):
             props = feature.get("properties", {})
             geoid = props.get("GEOID10")
-            name = props.get("NAMELSAD10", "")
-            
-            if geoid:
-                mapping[str(geoid)] = name
-        
+            if not geoid:
+                continue
+
+            entry: Dict[str, str] = {}
+            if props.get("NAMELSAD10"):
+                entry["name"] = str(props.get("NAMELSAD10"))
+            if props.get("TRACTCE10"):
+                entry["tract"] = str(props.get("TRACTCE10"))
+            if props.get("BLKGRPCE10"):
+                entry["blk"] = str(props.get("BLKGRPCE10"))
+
+            mapping[str(geoid)] = entry
+
         return mapping
     except Exception as e:
         # If GeoJSON loading fails, return empty dict
@@ -164,24 +178,50 @@ def run_huff_model(
     # Convert to frontend-expected format for the competitors table
     # Load GeoJSON mapping for better CBG names
     geoid_to_name = _load_geoid_to_name_mapping()
-    
+
     competitors_sample = []
     for idx, row in top_cbg_rows.iterrows():
         geoid = str(row['geoid'])
-        
-        # Try to get name from GeoJSON first, fallback to geoid-based name
-        if geoid in geoid_to_name:
-            cbg_name = geoid_to_name[geoid]
+
+        cbg_name = None
+        meta = geoid_to_name.get(geoid, {})
+
+        # Prefer explicit tract and blk from GeoJSON if available
+        tract_val = meta.get('tract')
+        blk_val = meta.get('blk')
+        if tract_val and blk_val:
+            # Ensure block group is two digits with leading zero if needed
+            try:
+                blk_int = int(blk_val)
+                blk_str = f"{blk_int:02d}"
+            except Exception:
+                blk_str = str(blk_val).zfill(2)
+
+            # Tract in GeoJSON may be like '731204' or '7312' depending on source; normalize to last 4-5 digits
+            tract = tract_val
+            # If tract looks longer than 4-5, keep as-is; otherwise use it directly
+            cbg_name = f"Tract {tract}, Block Group {blk_str}"
+
+        elif geoid in geoid_to_name and meta.get('name'):
+            # Fallback to NAMELSAD10 text
+            cbg_name = meta.get('name')
+
         else:
-            # Fallback: extract tract and block group from geoid
-            # geoid format: SSCCCTTTTBBBG (12 digits)
+            # Final fallback: parse from geoid string
             if len(geoid) >= 12:
                 tract = geoid[5:10]
                 block = geoid[10:12]
-                cbg_name = f"Tract {tract}, Block Group {block}"
+                # Zero-pad block group to 2 digits
+                try:
+                    block_int = int(block)
+                    block_str = f"{block_int:02d}"
+                except Exception:
+                    block_str = block
+
+                cbg_name = f"Tract {tract}, Block Group {block_str}"
             else:
                 cbg_name = f"CBG {geoid}"
-        
+
         competitors_sample.append({
             "name": cbg_name,
             "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
