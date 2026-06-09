@@ -1,8 +1,8 @@
--- SQLite Schema Export
+-- Azure SQL Schema (compatible with SQL Server 2016+)
 
 -- Table: cbg_master
--- CREATE TABLE for cbg_master (SQL Server compatible)
-CREATE TABLE IF NOT EXISTS [dbo].[cbg_master] (
+IF OBJECT_ID('[dbo].[cbg_master]', 'U') IS NULL
+CREATE TABLE [dbo].[cbg_master] (
   [geoid] NVARCHAR(100),
   [total_population] INT,
   [median_household_income] FLOAT,
@@ -20,9 +20,11 @@ CREATE TABLE IF NOT EXISTS [dbo].[cbg_master] (
   [x_26919] FLOAT,
   [y_26919] FLOAT
 );
+GO
 
--- CREATE TABLE for pois
-CREATE TABLE IF NOT EXISTS [dbo].[pois] (
+-- Table: pois
+IF OBJECT_ID('[dbo].[pois]', 'U') IS NULL
+CREATE TABLE [dbo].[pois] (
   [placekey] NVARCHAR(200),
   [location_name] NVARCHAR(500),
   [top_category] NVARCHAR(200),
@@ -33,47 +35,60 @@ CREATE TABLE IF NOT EXISTS [dbo].[pois] (
   [poi_cbg] NVARCHAR(100),
   [wkt_area_sq_meters] INT
 );
+GO
 
--- CREATE TABLE for cbg_poi_distance
-CREATE TABLE IF NOT EXISTS [dbo].[cbg_poi_distance] (
+-- Table: cbg_poi_distance
+IF OBJECT_ID('[dbo].[cbg_poi_distance]', 'U') IS NULL
+CREATE TABLE [dbo].[cbg_poi_distance] (
   [placekey] NVARCHAR(200),
   [geoid] NVARCHAR(100),
   [distance_m] FLOAT
 );
+GO
 
--- CREATE TABLE for cbg_poi_visits
-CREATE TABLE IF NOT EXISTS [dbo].[cbg_poi_visits] (
+-- Table: cbg_poi_visits
+IF OBJECT_ID('[dbo].[cbg_poi_visits]', 'U') IS NULL
+CREATE TABLE [dbo].[cbg_poi_visits] (
   [geoid] NVARCHAR(100),
   [placekey] NVARCHAR(200),
   [visit_count] INT
 );
+GO
 
--- CREATE TABLE for category_parameters
-CREATE TABLE IF NOT EXISTS [dbo].[category_parameters] (
+-- Table: category_parameters
+IF OBJECT_ID('[dbo].[category_parameters]', 'U') IS NULL
+CREATE TABLE [dbo].[category_parameters] (
   [top_category] NVARCHAR(200),
   [naics_code] NVARCHAR(50),
   [alpha] FLOAT,
   [beta] FLOAT,
   [correlation] FLOAT
 );
+GO
 
--- CREATE TABLE for Competitor_Summary
-CREATE TABLE IF NOT EXISTS [dbo].[Competitor_Summary] (
+-- Table: Competitor_Summary
+IF OBJECT_ID('[dbo].[Competitor_Summary]', 'U') IS NULL
+CREATE TABLE [dbo].[Competitor_Summary] (
   [geoid] NVARCHAR(100),
   [top_category] NVARCHAR(200),
   [total_u_existing] FLOAT
 );
+GO
 
--- CREATE TABLE for category_demand
-CREATE TABLE IF NOT EXISTS [dbo].[category_demand] (
+-- Table: category_demand
+IF OBJECT_ID('[dbo].[category_demand]', 'U') IS NULL
+CREATE TABLE [dbo].[category_demand] (
   [geoid] NVARCHAR(100),
   [top_category] NVARCHAR(200),
   [total_category_visits] INT
 );
+GO
 
--- CREATE TABLE for migration_summary
-CREATE TABLE IF NOT EXISTS [dbo].[migration_summary] (
+-- Table: migration_summary
+IF OBJECT_ID('[dbo].[migration_summary]', 'U') IS NULL
+CREATE TABLE [dbo].[migration_summary] (
   [table_name] NVARCHAR(100) NOT NULL,
   [row_count] INT NOT NULL
 );
+GO
 
