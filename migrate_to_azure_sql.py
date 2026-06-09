@@ -191,12 +191,18 @@ def migrate() -> dict:
                 "category_parameters": ["top_category", "naics_code", "alpha", "beta", "correlation"],
                 "Competitor_Summary": ["geoid", "top_category", "total_u_existing"],
                 "category_demand": ["geoid", "top_category", "total_category_visits"],
+                "migration_summary": ["table_name", "row_count"],
             }
 
             logger.info("Uploading data to Azure SQL using per-row insert statements...")
             cursor = conn.cursor()
             for tbl, cols in table_inserts.items():
-                df = dfs.get(tbl)
+                # special handling for migration_summary: use the pre-computed migration_summary DataFrame
+                if tbl == "migration_summary":
+                    df = migration_summary
+                else:
+                    df = dfs.get(tbl)
+                    
                 if df is None or df.empty:
                     logger.info("No data for table %s, skipping", tbl)
                     continue
