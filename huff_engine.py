@@ -6,6 +6,7 @@ It exposes run_huff_model(), which is the function app.py already expects.
 """
 
 import difflib
+import json
 import time
 from typing import Any, Dict, Optional
 
@@ -13,6 +14,29 @@ import pandas as pd
 from pyproj import Transformer
 
 from db import get_connection
+
+
+def _load_geoid_to_name_mapping(geojson_path: str = "Data/worcester_cbgs_map.geojson") -> Dict[str, str]:
+    """Load GeoJSON and create a mapping from GEOID10 to NAMELSAD10 (CBG name)."""
+    try:
+        with open(geojson_path, 'r', encoding='utf-8') as f:
+            geojson_data = json.load(f)
+        
+        mapping = {}
+        for feature in geojson_data.get("features", []):
+            props = feature.get("properties", {})
+            geoid = props.get("GEOID10")
+            name = props.get("NAMELSAD10", "")
+            
+            if geoid:
+                mapping[str(geoid)] = name
+        
+        return mapping
+    except Exception as e:
+        # If GeoJSON loading fails, return empty dict
+        # (will fall back to geoid-based naming)
+        print(f"Warning: Could not load GeoJSON mapping: {e}")
+        return {}
 
 
 def _find_category_parameters(conn, user_category: str):
@@ -137,8 +161,36 @@ def run_huff_model(
         ["geoid", "total_category_visits", "total_u_existing", "new_dist_m", "p_new", "predicted_visits"]
     ].head(10)
 
-    # Give the LLM/frontend a small sample instead of the full DataFrame.
-    competitors_sample = top_cbg_rows.to_dict(orient="records")
+    # Convert to frontend-expected format for the competitors table
+    # Load GeoJSON mapping for better CBG names
+    geoid_to_name = _load_geoid_to_name_mapping()
+    
+    competitors_sample = []
+    for idx, row in top_cbg_rows.iterrows():
+        geoid = str(row['geoid'])
+        
+        # Try to get name from GeoJSON first, fallback to geoid-based name
+        if geoid in geoid_to_name:
+            cbg_name = geoid_to_name[geoid]
+        else:
+            # Fallback: extract tract and block group from geoid
+            # geoid format: SSCCCTTTTBBBG (12 digits)
+            if len(geoid) >= 12:
+                tract = geoid[5:10]
+                block = geoid[10:12]
+                cbg_name = f"Tract {tract}, Block Group {block}"
+            else:
+                cbg_name = f"CBG {geoid}"
+        
+        competitors_sample.append({
+            "name": cbg_name,
+            "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
+            "size": int(row["total_category_visits"]),
+            "attraction": round(row["p_new"], 4),
+            # Also keep raw data for backend use
+            "geoid": row["geoid"],
+            "predicted_visits": round(row["predicted_visits"], 2),
+        })
 
     return {
         "matched_category": result["matched_category"],
