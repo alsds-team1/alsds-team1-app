@@ -116,6 +116,47 @@ def db_structure():
 
 
 # -------------------------
+# Admin: manual migration trigger
+# -------------------------
+@app.route("/admin/migrate", methods=["GET", "POST"])
+def admin_migrate():
+    """Admin endpoint to manually trigger database migration from SQLite to Azure SQL.
+
+    Access control: requires query parameter `key=12345678`.
+    Returns JSON with migration status and summary.
+    
+    The migration:
+    1. Reads from Data/team1.db (SQLite)
+    2. Executes CREATE TABLE statements from sql/create_tables.sql
+    3. Inserts data with optimized chunking (1000 rows per commit)
+    4. Reports detailed progress and any errors
+    
+    Usage:
+    GET /admin/migrate?key=12345678
+    """
+    key = request.args.get("key", "")
+    if key != "12345678":
+        return jsonify({"ok": False, "error": "Unauthorized or missing key"}), 401
+
+    try:
+        app.logger.info("Admin triggered migration")
+        result = migrate()
+        
+        if result.get("ok"):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        app.logger.exception("admin_migrate endpoint failed: %s", str(e))
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "message": "Migration failed with exception"
+        }), 500
+
+
+# -------------------------
 # Admin: drop specific tables (hardcoded list)
 # -------------------------
 @app.route("/admin/drop_tables", methods=["GET"])
@@ -300,5 +341,4 @@ Do not invent data.
 # Run locally
 # -------------------------
 if __name__ == "__main__":
-    migrate()
     app.run(host="0.0.0.0", port=8000, debug=True)
