@@ -80,7 +80,10 @@ h3 {
 }
 
 .chat-messages {
-  flex: 1;
+  /* allow the messages area to grow/shrink inside the chat-panel
+     and enable internal scrolling when content overflows */
+  flex: 1 1 auto;
+  min-height: 0; /* critical for flex children with overflow */
   overflow-y: auto;
   overflow-x: hidden;
   border: 1px solid #e5e7eb;
@@ -88,8 +91,6 @@ h3 {
   padding: 12px;
   background: #f9fafb;
   margin-bottom: 12px;
-  min-height: 100px;
-  max-height: 500px;
   word-wrap: break-word;
 }
 
