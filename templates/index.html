@@ -31,12 +31,28 @@
       </div>
     </section>
 
+    <div class="right-toggle-row">
+      <button id="showMapBtn" class="toggle-btn active">return map</button>
+      <button id="showResultBtn" class="toggle-btn">check predicted result</button>
+    </div>
+
     <section class="panel map-panel">
-      <h2>Map</h2>
-      <div id="map"></div>
-      <div id="selectedLocation" class="selected-location">
-        No candidate location selected yet.
+      <div id="mapContainer" class="map-container">
+        <h2>Map</h2>
+        <div id="map"></div>
+        <div id="selectedLocation" class="selected-location">
+          No candidate location selected yet.
+        </div>
       </div>
+    </section>
+
+    <section class="panel result-panel hidden">
+      <h2>Predicted Result</h2>
+      <div id="resultSummarySmall" class="result-summary">
+        No model result yet.
+      </div>
+      <h3>Nearby Competitors / Attraction Scores</h3>
+      <div id="competitorTableSmall" class="table-wrap"></div>
     </section>
 
     <section class="panel result-panel">

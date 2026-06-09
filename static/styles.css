@@ -52,6 +52,41 @@ header p {
   min-height: 520px;
 }
 
+.map-toggle-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.toggle-btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.toggle-btn.active {
+  background: #39ed8d;
+  color: #1f2937;
+  border-color: #39ed8d;
+}
+
+.right-toggle-row {
+  grid-column: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+/* Hide / show entire panels */
+.map-panel.hidden,
+.result-panel.hidden {
+  display: none;
+}
+
 .result-panel {
   grid-column: 2;
 }
