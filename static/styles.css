@@ -82,11 +82,15 @@ h3 {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 12px;
   background: #f9fafb;
   margin-bottom: 12px;
+  min-height: 100px;
+  max-height: 500px;
+  word-wrap: break-word;
 }
 
 .message {
