@@ -40,10 +40,14 @@ def sanitize_value(value):
     return value
 
 
-def insert_dataframe(conn, table_name: str, df: pd.DataFrame, columns: List[str], chunk_size: int = 50000) -> None:
+def insert_dataframe(conn, table_name: str, df: pd.DataFrame, columns: List[str], chunk_size: int = 1000) -> None:
     """
-    Safely insert DataFrame data into Azure SQL in chunks to prevent memory overflow (OOM).
-    :param chunk_size: Number of rows to process and insert per batch. Adjust based on server memory.
+    Safely insert DataFrame data into Azure SQL in chunks with per-chunk commit to prevent:
+    - Long-running transactions that exhaust tempdb/transaction log
+    - Memory overflow (OOM)
+    - Service timeouts
+    
+    :param chunk_size: Number of rows to insert and commit per batch. Reduced from 50000 to 1000 for stability.
     """
     if df.empty:
         return
@@ -52,36 +56,59 @@ def insert_dataframe(conn, table_name: str, df: pd.DataFrame, columns: List[str]
     col_sql = ", ".join(f"[{c}]" for c in columns)
     sql = f"INSERT INTO {table_name} ({col_sql}) VALUES ({placeholders})"
     
-    cursor = conn.cursor()
-    # Enable fast_executemany to greatly boost bulk insert speed
-    cursor.fast_executemany = True 
-    
     total_rows = len(df)
+    chunks_completed = 0
+    rows_inserted = 0
     
     # Use range to slice DataFrame by step
     for start_idx in range(0, total_rows, chunk_size):
         end_idx = min(start_idx + chunk_size, total_rows)
         
-        # 1. Slice out the current small chunk of the DataFrame (e.g., 0 to 50000 rows)
-        chunk_df = df.iloc[start_idx:end_idx]
+        cursor = conn.cursor()
+        cursor.fast_executemany = True
         
-        # 2. Convert only this small chunk of data to a List; memory footprint remains strictly bounded
-        rows = [
-            tuple(sanitize_value(v) for v in row) 
-            for row in chunk_df[columns].itertuples(index=False, name=None)
-        ]
-        
-        # 3. Insert into database immediately
-        if rows:
-            try:
+        try:
+            # 1. Slice out the current small chunk of the DataFrame
+            chunk_df = df.iloc[start_idx:end_idx]
+            
+            # 2. Convert only this small chunk of data to a List; memory footprint remains strictly bounded
+            rows = [
+                tuple(sanitize_value(v) for v in row) 
+                for row in chunk_df[columns].itertuples(index=False, name=None)
+            ]
+            
+            # 3. Insert this chunk into database
+            if rows:
                 cursor.executemany(sql, rows)
-                logger.info("  -> [%s] Successfully inserted rows %d to %d", table_name, start_idx + 1, end_idx)
-            except Exception as e:
-                logger.exception("  -> [%s] Failed to insert rows %d to %d!", table_name, start_idx + 1, end_idx)
-                raise e # Raise exception to trigger outer rollback or error handling
-                
-    # Once all chunks for this DataFrame are successfully inserted, commit the transaction
-    conn.commit()
+                # IMPORTANT: Commit after EACH chunk to avoid long-running transactions
+                conn.commit()
+                rows_inserted += len(rows)
+                chunks_completed += 1
+                logger.info(
+                    "  -> [%s] Chunk %d: inserted rows %d to %d (total: %d/%d)",
+                    table_name, chunks_completed, start_idx + 1, end_idx, rows_inserted, total_rows
+                )
+        except Exception as e:
+            # If a chunk fails, log the error with context and re-raise
+            logger.exception(
+                "  -> [%s] FAILED at chunk %d (rows %d-%d): %s",
+                table_name, chunks_completed + 1, start_idx + 1, end_idx, str(e)
+            )
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise e
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+    
+    logger.info(
+        "  -> [%s] Insertion complete: %d chunks, %d total rows inserted",
+        table_name, chunks_completed, rows_inserted
+    )
 
 
 def execute_statements(conn, statements: Iterable[str]) -> None:
@@ -220,9 +247,9 @@ def migrate() -> dict:
                     logger.info("Target table %s already has %d rows — skipping insert", tbl, existing)
                     continue
 
-                logger.info("Inserting %d rows into %s (chunked)", len(df), tbl)
+                logger.info("Inserting %d rows into %s (chunked, 1000 rows per commit)", len(df), tbl)
                 try:
-                    insert_dataframe(conn, f"[dbo].[{tbl}]", df, cols, chunk_size=5000)
+                    insert_dataframe(conn, f"[dbo].[{tbl}]", df, cols, chunk_size=1000)
                 except Exception:
                     logger.exception("Failed to insert chunked rows into %s", tbl)
                     raise
