@@ -20,7 +20,7 @@ fetch("/static/data/worcester_cbgs_map.geojson")
     const geoLayer = L.geoJSON(data, {
       style: {
         weight: 1,
-        color: "#2563eb",
+        color: "#ec7d22ff",
         opacity: 0.7,
         fillOpacity: 0.08
       }
