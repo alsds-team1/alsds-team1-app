@@ -10,7 +10,7 @@ body {
 }
 
 header {
-  background: #111827;
+  background: #39ed8d;
   color: white;
   padding: 18px 28px;
 }
@@ -127,14 +127,14 @@ button {
   padding: 11px 16px;
   border-radius: 10px;
   border: none;
-  background: #2563eb;
+  background: #39ed8d;
   color: white;
   font-weight: 600;
   cursor: pointer;
 }
 
 button:hover {
-  background: #1d4ed8;
+  background: #39ed8dcf;
 }
 
 .hint {
