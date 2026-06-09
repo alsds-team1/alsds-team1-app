@@ -11,18 +11,19 @@ body {
 
 header {
   background: #39ed8d;
-  color: white;
+  color: #1f2937;
   padding: 18px 28px;
 }
 
 header h1 {
   margin: 0 0 6px 0;
   font-size: 24px;
+  color: #1f2937;
 }
 
 header p {
   margin: 0;
-  color: #d1d5db;
+  color: #1f2937;
 }
 
 .layout {
@@ -128,7 +129,7 @@ button {
   border-radius: 10px;
   border: none;
   background: #39ed8d;
-  color: white;
+  color: #1f2937;
   font-weight: 600;
   cursor: pointer;
 }
