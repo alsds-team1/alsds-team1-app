@@ -116,6 +116,66 @@ def db_structure():
 
 
 # -------------------------
+# Admin: drop specific tables (hardcoded list)
+# -------------------------
+@app.route("/admin/drop_tables", methods=["GET"])
+def admin_drop_tables():
+    """Simplified admin endpoint: drops a fixed set of tables using DROP TABLE statements.
+
+    Access control: requires query parameter `key=12345678`.
+    The tables dropped are the keys from the migration's table_inserts mapping.
+    """
+    key = request.args.get("key", "")
+    if key != "12345678":
+        return jsonify({"ok": False, "error": "Unauthorized or missing key"}), 401
+
+    # Hardcoded table names must match migrate_to_azure_sql.table_inserts keys
+    tables_to_drop = [
+        "cbg_master",
+        "pois",
+        "cbg_poi_distance",
+        "cbg_poi_visits",
+        "category_parameters",
+        "Competitor_Summary",
+        "category_demand",
+    ]
+
+    dropped = []
+    errors = []
+
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # perform drops one by one; this is destructive and irreversible
+            for tbl in tables_to_drop:
+                try:
+                    cursor.execute(f"DROP TABLE [dbo].[{tbl}]")
+                    dropped.append(tbl)
+                except Exception as ex:
+                    errors.append({"table": tbl, "error": str(ex)})
+
+            # commit if there were no errors
+            if errors:
+                try:
+                    cursor.execute("ROLLBACK TRANSACTION")
+                except Exception:
+                    pass
+                return jsonify({"ok": False, "dropped": dropped, "errors": errors}), 500
+
+            try:
+                cursor.execute("COMMIT TRANSACTION")
+            except Exception:
+                # commit may be implicit/automatic depending on pyodbc settings; ignore commit failure
+                pass
+
+            return jsonify({"ok": True, "dropped": dropped})
+
+    except Exception as e:
+        app.logger.exception("admin_drop_tables failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# -------------------------
 # Run Huff Model
 # -------------------------
 
