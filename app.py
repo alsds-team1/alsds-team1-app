@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from flask import Flask, request, jsonify, render_template
 from openai import AzureOpenAI
 from migrate_to_azure_sql import migrate
@@ -115,105 +116,8 @@ def db_structure():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# -------------------------
-# Admin: manual migration trigger
-# -------------------------
-@app.route("/admin/migrate", methods=["GET", "POST"])
-def admin_migrate():
-    """Admin endpoint to manually trigger database migration from SQLite to Azure SQL.
-
-    Access control: requires query parameter `key=12345678`.
-    Returns JSON with migration status and summary.
-    
-    The migration:
-    1. Reads from Data/team1.db (SQLite)
-    2. Executes CREATE TABLE statements from sql/create_tables.sql
-    3. Inserts data with optimized chunking (1000 rows per commit)
-    4. Reports detailed progress and any errors
-    
-    Usage:
-    GET /admin/migrate?key=12345678
-    """
-    key = request.args.get("key", "")
-    if key != "12345678":
-        return jsonify({"ok": False, "error": "Unauthorized or missing key"}), 401
-
-    try:
-        app.logger.info("Admin triggered migration")
-        result = migrate()
-        
-        if result.get("ok"):
-            return jsonify(result), 200
-        else:
-            return jsonify(result), 500
-            
-    except Exception as e:
-        app.logger.exception("admin_migrate endpoint failed: %s", str(e))
-        return jsonify({
-            "ok": False,
-            "error": str(e),
-            "message": "Migration failed with exception"
-        }), 500
 
 
-# -------------------------
-# Admin: drop specific tables (hardcoded list)
-# -------------------------
-@app.route("/admin/drop_tables", methods=["GET"])
-def admin_drop_tables():
-    """Simplified admin endpoint: drops a fixed set of tables using DROP TABLE statements.
-
-    Access control: requires query parameter `key=12345678`.
-    The tables dropped are the keys from the migration's table_inserts mapping.
-    """
-    key = request.args.get("key", "")
-    if key != "12345678":
-        return jsonify({"ok": False, "error": "Unauthorized or missing key"}), 401
-
-    # Hardcoded table names must match migrate_to_azure_sql.table_inserts keys
-    tables_to_drop = [
-        "cbg_master",
-        "pois",
-        "cbg_poi_distance",
-        "cbg_poi_visits",
-        "category_parameters",
-        "Competitor_Summary",
-        "category_demand",
-    ]
-
-    dropped = []
-    errors = []
-
-    try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            # perform drops one by one; this is destructive and irreversible
-            for tbl in tables_to_drop:
-                try:
-                    cursor.execute(f"DROP TABLE [dbo].[{tbl}]")
-                    dropped.append(tbl)
-                except Exception as ex:
-                    errors.append({"table": tbl, "error": str(ex)})
-
-            # commit if there were no errors
-            if errors:
-                try:
-                    cursor.execute("ROLLBACK TRANSACTION")
-                except Exception:
-                    pass
-                return jsonify({"ok": False, "dropped": dropped, "errors": errors}), 500
-
-            try:
-                cursor.execute("COMMIT TRANSACTION")
-            except Exception:
-                # commit may be implicit/automatic depending on pyodbc settings; ignore commit failure
-                pass
-
-            return jsonify({"ok": True, "dropped": dropped})
-
-    except Exception as e:
-        app.logger.exception("admin_drop_tables failed")
-        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # -------------------------
@@ -340,5 +244,85 @@ Do not invent data.
 # -------------------------
 # Run locally
 # -------------------------
+
+
+@app.route('/admin/migrate_geojson_from_sql', methods=['GET', 'POST'])
+def admin_migrate_geojson_from_sql():
+    """Execute sql/create_tables.sql and insert GEOID10/geometry from geojson into dbo.cbg_geometries.
+
+    Protected by key=12345678 query parameter.
+    """
+    key = request.args.get('key', '')
+    if key != '12345678':
+        return jsonify({'ok': False, 'error': 'Unauthorized or missing key'}), 401
+
+    sql_path = os.path.join(app.root_path, 'sql', 'create_tables.sql')
+    geojson_path = os.path.join(app.root_path, 'static', 'data', 'worcester_cbgs_map.geojson')
+
+    if not os.path.exists(sql_path):
+        return jsonify({'ok': False, 'error': f'create_tables.sql not found at {sql_path}'}), 400
+    if not os.path.exists(geojson_path):
+        return jsonify({'ok': False, 'error': f'GeoJSON not found at {geojson_path}'}), 400
+
+    try:
+        # read and execute create_tables.sql splitting on GO lines
+        with open(sql_path, 'r', encoding='utf-8') as f:
+            sql_text = f.read()
+
+        blocks = [b.strip() for b in re.split(r'^\s*GO\s*$', sql_text, flags=re.IGNORECASE | re.MULTILINE) if b.strip()]
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            for block in blocks:
+                try:
+                    cursor.execute(block)
+                except Exception:
+                    # fallback: try splitting by semicolon
+                    for stmt in [s.strip() for s in block.split(';') if s.strip()]:
+                        try:
+                            cursor.execute(stmt)
+                        except Exception:
+                            app.logger.exception('Failed to execute statement during create_tables.sql')
+
+            # load geojson
+            with open(geojson_path, 'r', encoding='utf-8') as gf:
+                gj = json.load(gf)
+
+            features = gj.get('features', [])
+            inserted = 0
+            errors = []
+
+            for feat in features:
+                props = feat.get('properties') or {}
+                geoid = props.get('GEOID10') or props.get('GEOID') or props.get('geoid')
+                geometry = feat.get('geometry')
+                if not geoid:
+                    errors.append({'reason': 'missing geoid', 'properties': props})
+                    continue
+
+                geom_json = json.dumps(geometry, ensure_ascii=False)
+
+                try:
+                    # upsert into dbo.cbg_geometries
+                    cursor.execute('SELECT 1 FROM dbo.cbg_geometries WHERE geoid = ?', (geoid,))
+                    if cursor.fetchone():
+                        cursor.execute('UPDATE dbo.cbg_geometries SET geometry = ? WHERE geoid = ?', (geom_json, geoid))
+                    else:
+                        cursor.execute('INSERT INTO dbo.cbg_geometries (geoid, geometry) VALUES (?, ?)', (geoid, geom_json))
+                    inserted += 1
+                except Exception as ex:
+                    app.logger.exception('Failed to insert geometry for geoid %s: %s', geoid, str(ex))
+                    errors.append({'geoid': geoid, 'error': str(ex)})
+
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
+        return jsonify({'ok': True, 'inserted': inserted, 'errors': errors})
+
+    except Exception as e:
+        app.logger.exception('migrate_geojson_from_sql failed')
+        return jsonify({'ok': False, 'error': str(e)}), 500
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
