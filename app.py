@@ -246,29 +246,22 @@ Do not invent data.
 # -------------------------
 
 
-@app.route('/admin/migrate_geojson_from_sql', methods=['GET', 'POST'])
-def admin_migrate_geojson_from_sql():
-    """Execute sql/create_tables.sql and insert GEOID10/geometry from geojson into dbo.cbg_geometries.
+@app.route('/admin/create_tables', methods=['GET', 'POST'])
+def admin_create_tables():
 
-    Protected by key=12345678 query parameter.
-    """
     key = request.args.get('key', '')
     if key != '12345678':
         return jsonify({'ok': False, 'error': 'Unauthorized or missing key'}), 401
 
     sql_path = os.path.join(app.root_path, 'sql', 'create_tables.sql')
-    geojson_path = os.path.join(app.root_path, 'static', 'data', 'worcester_cbgs_map.geojson')
-
     if not os.path.exists(sql_path):
-        return jsonify({'ok': False, 'error': f'create_tables.sql not found at {sql_path}'}), 400
-    if not os.path.exists(geojson_path):
-        return jsonify({'ok': False, 'error': f'GeoJSON not found at {geojson_path}'}), 400
+        return jsonify({'ok': False, 'error': f'SQL file not found at {sql_path}'}), 400
 
     try:
-        # read and execute create_tables.sql splitting on GO lines
         with open(sql_path, 'r', encoding='utf-8') as f:
             sql_text = f.read()
 
+        # split on GO statements that are on their own line, ignoring case and surrounding whitespace
         blocks = [b.strip() for b in re.split(r'^\s*GO\s*$', sql_text, flags=re.IGNORECASE | re.MULTILINE) if b.strip()]
 
         with get_connection() as conn:
@@ -276,33 +269,49 @@ def admin_migrate_geojson_from_sql():
             for block in blocks:
                 try:
                     cursor.execute(block)
-                except Exception:
-                    # fallback: try splitting by semicolon
-                    for stmt in [s.strip() for s in block.split(';') if s.strip()]:
-                        try:
-                            cursor.execute(stmt)
-                        except Exception:
-                            app.logger.exception('Failed to execute statement during create_tables.sql')
+                except Exception as ex:
+                    # log the error and the block that caused it, but continue with the next blocks
+                    app.logger.exception('Failed to execute SQL block')
+                    return jsonify({'ok': False, 'error': f'DDL Execution Failed: {str(ex)}', 'sql_block': block}), 500
+            
+            conn.commit()
 
-            # Ensure DDL changes are committed so subsequent inserts see the new tables
-            try:
-                conn.commit()
-            except Exception:
-                # some DB drivers auto-commit DDL; ignore commit failures but log
-                app.logger.info('Commit after create_tables.sql failed or not supported; continuing')
+        return jsonify({'ok': True, 'msg': 'Tables created successfully'})
 
-            # load geojson
-            with open(geojson_path, 'r', encoding='utf-8') as gf:
-                gj = json.load(gf)
+    except Exception as e:
+        app.logger.exception('create_tables failed')
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    
+@app.route('/admin/insert_geojson', methods=['GET', 'POST'])
+def admin_insert_geojson():
+    """
+    Read `worcester_cbgs_map.geojson` and insert/update features into the `dbo.cbg_geometries` table.
 
-            features = gj.get('features', [])
-            inserted = 0
-            errors = []
+    Access control: requires query parameter `key=12345678`.
+    """
+    key = request.args.get('key', '')
+    if key != '12345678':
+        return jsonify({'ok': False, 'error': 'Unauthorized or missing key'}), 401
 
+    geojson_path = os.path.join(app.root_path, 'static', 'data', 'worcester_cbgs_map.geojson')
+    if not os.path.exists(geojson_path):
+        return jsonify({'ok': False, 'error': f'GeoJSON not found at {geojson_path}'}), 400
+
+    try:
+        with open(geojson_path, 'r', encoding='utf-8') as gf:
+            gj = json.load(gf)
+
+        features = gj.get('features', [])
+        inserted = 0
+        errors = []
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
             for feat in features:
                 props = feat.get('properties') or {}
                 geoid = props.get('GEOID10') or props.get('GEOID') or props.get('geoid')
                 geometry = feat.get('geometry')
+
                 if not geoid:
                     errors.append({'reason': 'missing geoid', 'properties': props})
                     continue
@@ -310,7 +319,7 @@ def admin_migrate_geojson_from_sql():
                 geom_json = json.dumps(geometry, ensure_ascii=False)
 
                 try:
-                    # upsert into dbo.cbg_geometries
+                    # Check existence and perform upsert (update if exists, insert otherwise)
                     cursor.execute('SELECT 1 FROM dbo.cbg_geometries WHERE geoid = ?', (geoid,))
                     if cursor.fetchone():
                         cursor.execute('UPDATE dbo.cbg_geometries SET geometry = ? WHERE geoid = ?', (geom_json, geoid))
@@ -318,20 +327,17 @@ def admin_migrate_geojson_from_sql():
                         cursor.execute('INSERT INTO dbo.cbg_geometries (geoid, geometry) VALUES (?, ?)', (geoid, geom_json))
                     inserted += 1
                 except Exception as ex:
-                    app.logger.exception('Failed to insert geometry for geoid %s: %s', geoid, str(ex))
+                    # Record per-row insertion error and continue processing other features
                     errors.append({'geoid': geoid, 'error': str(ex)})
 
-            try:
-                conn.commit()
-            except Exception:
-                pass
+            conn.commit()
 
         return jsonify({'ok': True, 'inserted': inserted, 'errors': errors})
 
     except Exception as e:
-        app.logger.exception('migrate_geojson_from_sql failed')
+        app.logger.exception('insert_geojson failed')
         return jsonify({'ok': False, 'error': str(e)}), 500
-    
+
 @app.route("/api/get_cbg_map", methods=["GET"])
 def get_cbg_map():
     try:
