@@ -284,6 +284,13 @@ def admin_migrate_geojson_from_sql():
                         except Exception:
                             app.logger.exception('Failed to execute statement during create_tables.sql')
 
+            # Ensure DDL changes are committed so subsequent inserts see the new tables
+            try:
+                conn.commit()
+            except Exception:
+                # some DB drivers auto-commit DDL; ignore commit failures but log
+                app.logger.info('Commit after create_tables.sql failed or not supported; continuing')
+
             # load geojson
             with open(geojson_path, 'r', encoding='utf-8') as gf:
                 gj = json.load(gf)
@@ -324,5 +331,34 @@ def admin_migrate_geojson_from_sql():
     except Exception as e:
         app.logger.exception('migrate_geojson_from_sql failed')
         return jsonify({'ok': False, 'error': str(e)}), 500
+    
+@app.route("/api/get_cbg_map", methods=["GET"])
+def get_cbg_map():
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT geoid, geometry FROM cbg_geometries")
+        rows = cursor.fetchall()
+        conn.close()
+
+        features = []
+        for row in rows:
+            geoid = row[0]
+            geometry = json.loads(row[1])
+            features.append({
+                "type": "Feature",
+                "properties": {"geoid": geoid},
+                "geometry": geometry
+            })
+
+        return jsonify({
+            "type": "FeatureCollection",
+            "features": features
+        })
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)

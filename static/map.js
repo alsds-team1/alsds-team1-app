@@ -9,10 +9,10 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap contributors"
 }).addTo(map);
 
-fetch("/static/data/worcester_cbgs_map.geojson")
+fetch("/api/get_cbg_map")
   .then(response => {
     if (!response.ok) {
-      throw new Error("GeoJSON not found");
+      throw new Error("CBG Map API error");
     }
     return response.json();
   })
@@ -29,7 +29,7 @@ fetch("/static/data/worcester_cbgs_map.geojson")
     map.fitBounds(geoLayer.getBounds());
   })
   .catch(error => {
-    console.warn("Worcester GeoJSON layer could not be loaded:", error);
+    console.warn("CBG Map could not be loaded:", error);
   });
 
 map.on("click", function (event) {
