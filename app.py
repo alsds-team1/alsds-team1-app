@@ -533,6 +533,12 @@ Hard rules:
   instead of calling the tool again.
 - Keep replies concise and grounded in the tool output. If you lack information, say
   exactly what you still need.
+- If the tool result has "no_demand_data": true, the dataset has no demand or competitor
+  data for that category in Worcester. Do NOT interpret the zero visits or zero market
+  share as a market signal, and do not claim the location is good or bad. State plainly
+  that the dataset has no data for that category, so no prediction can be made, and
+  suggest the user try a category the system covers (for example a calibrated NAICS code).
+  Never describe the top neighborhoods as "competitors" in this case.
 - Worcester is roughly latitude 42.2-42.3 and longitude -71.9 to -71.7. Gently flag
   coordinates that fall well outside this range before running.
 """
@@ -599,6 +605,8 @@ def _compact_result_for_model(result):
     return {
         "predicted_visits": result.get("predicted_visits"),
         "market_share": result.get("market_share"),
+        "no_demand_data": result.get("no_demand_data"),
+        "total_demand": result.get("total_demand"),
         "runtime_ms": result.get("runtime_ms"),
         "notes": result.get("notes"),
         "competitor_count": len(competitors),
