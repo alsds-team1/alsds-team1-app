@@ -363,6 +363,32 @@ def db_structure():
 # help function
 # -------------------------
 
+_DEMAND_CATEGORIES = None
+
+
+def _get_demand_categories():
+    """Distinct category names that actually have demand data in Worcester (cached).
+
+    The NAICS whitelist promises more categories than the dataset can serve, which is how
+    dead-ends like NAICS 4442 slip through. This queries the database once and treats it as
+    the source of truth for which categories can produce a non-empty prediction.
+    """
+    global _DEMAND_CATEGORIES
+    if _DEMAND_CATEGORIES is None:
+        try:
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT DISTINCT top_category FROM category_demand")
+                rows = cur.fetchall()
+            _DEMAND_CATEGORIES = {
+                str(r[0]).strip().lower() for r in rows if r and r[0] is not None
+            }
+        except Exception:
+            app.logger.exception("Could not load demand categories")
+            _DEMAND_CATEGORIES = set()
+    return _DEMAND_CATEGORIES
+
+
 def resolve_naics_code(user_input, naics_whitelist, naics_calibrated, client, deployment):
     """
     Core logic function to classify business descriptions into NAICS codes.
@@ -425,11 +451,26 @@ def resolve_naics_code(user_input, naics_whitelist, naics_calibrated, client, de
     confidence = parsed.get("confidence", "low")
     is_fallback = naics_code not in naics_calibrated
 
+    # Verify the category actually has demand data in Worcester. The whitelist is broader
+    # than the dataset (e.g. NAICS 4442 has no rows), so without this check the resolver
+    # would happily return categories that can only ever produce an empty 0/0 prediction.
+    canonical_name = naics_whitelist[naics_code]
+    if canonical_name.strip().lower() not in _get_demand_categories():
+        return {
+            "ok": False,
+            "error": (
+                f"'{canonical_name}' (NAICS {naics_code}) is recognized but has no data in "
+                f"the Worcester dataset, so no prediction can be made for it. Please try a "
+                f"supported category."
+            ),
+        }
+
     # Construct success response structure
     result = {
         "naics_code": naics_code,
         "category_name": category_name,
-        "is_fallback": is_fallback
+        "is_fallback": is_fallback,
+        "supported": True
     }
     
     # Flag low confidence matches for manual verification
@@ -542,6 +583,17 @@ Hard rules:
 - Worcester is roughly latitude 42.2-42.3 and longitude -71.9 to -71.7. Gently flag
   coordinates that fall well outside this range before running.
 """
+
+# Append the categories that actually have model data, so the controller can steer the
+# user to a covered category instead of running a prediction that will come back empty.
+CHAT_SYSTEM_PROMPT += (
+    "\nSupported categories — predictions are only meaningful for these, because they "
+    "have calibrated model data in Worcester:\n"
+    + "\n".join(f"  - {name} (NAICS {code})" for code, name in NAICS_CALIBRATED.items())
+    + "\n\nIf the user's business is not one of these, tell them it's outside the current "
+    "Worcester dataset and offer the closest supported category, instead of running a "
+    "prediction that will come back empty.\n"
+)
 
 HUFF_TOOL = {
     "type": "function",
