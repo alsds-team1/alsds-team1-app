@@ -40,15 +40,38 @@ function handleSend() {
   sendUserTurn(text);
 }
 
-async function sendUserTurn(text) {
-  if (busy) return;
-  busy = true;
-  sendBtn.disabled = true;
+  try {
+    /*
+      IMPORTANT:
+      Before treating the message as a normal follow-up question,
+      check whether the user is asking to rerun the model with a new full set of inputs.
 
-  addUserMessage(text);
-  conversation.push({ role: "user", content: text });
+      Example supported message:
+      "use 42.229212, -71.805525 and rerun the model for NAICS code 4441 and area of 1000 square meters"
+    */
+    const rerunInputs = extractRerunInputs(text);
 
-  const typing = addBotMessage("…");
+    if (rerunInputs) {
+      await rerunModelFromMessage(rerunInputs);
+      return;
+    }
+
+    if (state.step === "category") {
+      const response = await fetch("/api/trans_naics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_input: text.trim() })
+      });
+
+      const data = await response.json();
+
+      if (!data.ok) {
+        addBotMessage(data.error || "I'm sorry, I couldn't identify that business type. Please try again with a more specific industry description, such as 'Beer, Wine, and Liquor Stores', 'Bakeries and Tortilla Manufacturing', or 'Building Material and Supplies Dealers'.");
+        return;
+      }
+
+      state.business_category = data.naics_code;
+      state.step = "location";
 
   try {
     const response = await fetch("/api/chat", {

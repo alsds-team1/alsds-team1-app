@@ -94,7 +94,7 @@ GO
 
 IF OBJECT_ID('[dbo].[cbg_geometries]', 'U') IS NULL
 CREATE TABLE [dbo].[cbg_geometries] (
-    [geoid] NVARCHAR(100) PRIMARY KEY,
+    [geoid] NVARCHAR(100),
     [geometry] NVARCHAR(MAX)
 );
 GO
