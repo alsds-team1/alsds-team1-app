@@ -262,6 +262,7 @@ NAICS_FALLBACK = {
     "926120": "Administration of Economic Programs"
 }
 
+
 NAICS_WHITELIST = {**NAICS_CALIBRATED, **NAICS_FALLBACK}
 
 
@@ -440,9 +441,18 @@ def resolve_naics_code(user_input, naics_whitelist, naics_calibrated, client, de
     # enough -- we also confirm the category has demand data before calling it predictable.
     if naics_code in naics_whitelist:
         canonical_name = naics_whitelist[naics_code]
-        has_demand = canonical_name.strip().lower() in _get_demand_categories()
-        if naics_code in naics_calibrated and has_demand:
-            mark = 0   # calibrated + has data
+        key = canonical_name.strip().lower()
+        has_demand = key in _get_demand_categories()
+        # Calibration is keyed by category NAME, not code: the expanded whitelist maps many
+        # granular codes (e.g. 444130) onto a calibrated category ("Building Material and
+        # Supplies Dealers"), so a code-only check would wrongly downgrade them to mark 1.
+        if isinstance(naics_calibrated, dict):
+            calibrated_names = {str(v).strip().lower() for v in naics_calibrated.values()}
+            is_calibrated = key in calibrated_names
+        else:
+            is_calibrated = naics_code in naics_calibrated
+        if is_calibrated and has_demand:
+            mark = 0   # calibrated category + has data
         elif has_demand:
             mark = 1   # data exists but uncalibrated (rough)
         else:
