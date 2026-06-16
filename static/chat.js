@@ -1,8 +1,9 @@
 const chatMessages = document.getElementById("chatMessages");
 const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
-// Declare at the global/top level to allow destroying the old chart instance
-let competitorsChart = null; 
+
+// Declared at top level so we can destroy the old chart instance before redrawing.
+let competitorsChart = null;
 
 // Canonical conversation history (server-authoritative). Holds user / assistant /
 // tool messages in OpenAI format. The system prompt lives on the server, so it is
@@ -42,38 +43,15 @@ function handleSend() {
   sendUserTurn(text);
 }
 
-  try {
-    /*
-      IMPORTANT:
-      Before treating the message as a normal follow-up question,
-      check whether the user is asking to rerun the model with a new full set of inputs.
+async function sendUserTurn(text) {
+  if (busy) return;
+  busy = true;
+  sendBtn.disabled = true;
 
-      Example supported message:
-      "use 42.229212, -71.805525 and rerun the model for NAICS code 4441 and area of 1000 square meters"
-    */
-    const rerunInputs = extractRerunInputs(text);
+  addUserMessage(text);
+  conversation.push({ role: "user", content: text });
 
-    if (rerunInputs) {
-      await rerunModelFromMessage(rerunInputs);
-      return;
-    }
-
-    if (state.step === "category") {
-      const response = await fetch("/api/trans_naics", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_input: text.trim() })
-      });
-
-      const data = await response.json();
-
-      if (!data.ok) {
-        addBotMessage(data.error || "I'm sorry, I couldn't identify that business type. Please try again with a more specific industry description, such as 'Beer, Wine, and Liquor Stores', 'Bakeries and Tortilla Manufacturing', or 'Building Material and Supplies Dealers'.");
-        return;
-      }
-
-      state.business_category = data.naics_code;
-      state.step = "location";
+  const typing = addBotMessage("…");
 
   try {
     const response = await fetch("/api/chat", {
@@ -103,6 +81,7 @@ function handleSend() {
     if (data.huff_result) {
       const r = data.huff_result;
       renderResult(r);
+      updateCompetitorsChart(r.competitors);
 
       if (window.setCandidateLocation &&
           typeof r.candidate_lat === "number" &&
@@ -171,21 +150,19 @@ function renderResult(result) {
   `;
 }
 
-
-
 function updateCompetitorsChart(competitors) {
   const section = document.getElementById("chartSection");
-  
-  // Keep the section hidden if there is no competitor data
+  if (!section) return;
+
+  // Keep the section hidden if there is no competitor data.
   if (!competitors || competitors.length === 0) {
     section.classList.add("hidden");
     return;
   }
 
-  // Remove the 'hidden' class to display the chart section
   section.classList.remove("hidden");
 
-  // 1. Data processing: sort by attraction in descending order and slice the top 10
+  // Sort by attraction descending and take the top 10.
   const top10 = [...competitors]
     .sort((a, b) => (Number(b.attraction) || 0) - (Number(a.attraction) || 0))
     .slice(0, 10);
@@ -193,10 +170,9 @@ function updateCompetitorsChart(competitors) {
   const labels = top10.map(c => c.name ?? c.poi_name ?? "Unknown");
   const data = top10.map(c => Number(c.attraction) || 0);
 
-  // 2. Render the chart
   const ctx = document.getElementById("topCompetitorsChart").getContext("2d");
 
-  // Destroy the existing chart instance before creating a new one to prevent overlay rendering issues
+  // Destroy the existing instance before redrawing to avoid overlay artifacts.
   if (competitorsChart) {
     competitorsChart.destroy();
   }
@@ -211,14 +187,14 @@ function updateCompetitorsChart(competitors) {
         backgroundColor: "rgba(54, 162, 235, 0.6)",
         borderColor: "rgba(54, 162, 235, 1)",
         borderWidth: 1,
-        borderRadius: 4 // Add a slight curve to the top of the bars
+        borderRadius: 4
       }]
     },
     options: {
       responsive: true,
-      maintainAspectRatio: false, // Allow the chart to fill the height of its parent container
+      maintainAspectRatio: false,
       plugins: {
-        legend: { display: false } // Hide the unnecessary legend
+        legend: { display: false }
       },
       scales: {
         y: {
@@ -228,32 +204,6 @@ function updateCompetitorsChart(competitors) {
       }
     }
   });
-}
-
-function parseCoordinates(text) {
-  /*
-    Supports:
-    42.229212, -71.805525
-    use 42.229212, -71.805525 and rerun...
-  */
-  const match = text.match(/(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
-
-  if (!match) {
-    return null;
-  }
-
-  const lat = Number(match[1]);
-  const lon = Number(match[2]);
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return null;
-  }
-
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-    return null;
-  }
-
-  return { lat, lon };
 }
 
 function addBotMessage(text) {
