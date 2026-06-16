@@ -99,6 +99,7 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
     with get_connection() as conn:
         params, used_fallback = _find_category_parameters(conn, category_query)
         matched_category = str(params["top_category"])
+        naics_code = str(params["naics_code"]) if not pd.isna(params["naics_code"]) else "Unknown"
         alpha = float(params["alpha"])
         beta = float(params["beta"])
         correlation = None if pd.isna(params["correlation"]) else float(params["correlation"])
@@ -127,6 +128,13 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
             params=[matched_category, matched_category],
         )
 
+    # CBGs without a projected centroid can't be scored. Dropping them keeps NaN
+    # distances out of the totals; otherwise they inflate total demand while
+    # contributing zero predicted visits, which understates market share.
+    total_cbgs = len(cbg_data)
+    cbg_data = cbg_data.dropna(subset=["x_26919", "y_26919"]).copy()
+    dropped_cbgs = total_cbgs - len(cbg_data)
+
     cbg_data["new_dist_m"] = (
         ((cbg_data["x_26919"] - new_x) ** 2 + (cbg_data["y_26919"] - new_y) ** 2) ** 0.5
     ).clip(lower=0.1)
@@ -144,15 +152,51 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
 
     return {
         "matched_category": matched_category,
+        "naics_code": naics_code,
         "alpha": alpha,
         "beta": beta,
         "correlation": correlation,
         "used_fallback": bool(used_fallback),
+        "dropped_cbgs": int(dropped_cbgs),
         "total_predicted_visits": total_predicted_visits,
         "market_share": market_share,
         "runtime_seconds": runtime_seconds,
         "details": details,
     }
+
+
+def _build_notes(result: Dict[str, Any]) -> str:
+    """Human-readable transparency note for the UI / chatbot.
+
+    Surfaces the calibration state (especially the uncalibrated fallback) and the
+    distance assumption, so a user is never shown confident numbers without context.
+    """
+    parts = []
+
+    if result.get("used_fallback"):
+        parts.append(
+            f"No calibrated parameters were found for '{result['matched_category']}', "
+            f"so default values (alpha=1.0, beta=1.0) were used — treat these results as rough."
+        )
+    else:
+        naics = result.get("naics_code")
+        naics_str = f", NAICS {naics}" if naics and naics != "Unknown" else ""
+        parts.append(
+            f"Category matched: {result['matched_category']}{naics_str} "
+            f"(alpha={result['alpha']:.3g}, beta={result['beta']:.3g})."
+        )
+
+    corr = result.get("correlation")
+    if corr is not None:
+        parts.append(f"Calibration correlation: {corr:.3g}.")
+
+    parts.append("Distances are straight-line from neighborhood (CBG) centroids.")
+
+    dropped = result.get("dropped_cbgs", 0)
+    if dropped:
+        parts.append(f"{dropped} CBG(s) without centroid coordinates were excluded.")
+
+    return " ".join(parts)
 
 
 def run_huff_model(
@@ -234,6 +278,7 @@ def run_huff_model(
 
     return {
         "matched_category": result["matched_category"],
+        "naics_code": result["naics_code"],
         "alpha": result["alpha"],
         "beta": result["beta"],
         "correlation": result["correlation"],
@@ -241,6 +286,7 @@ def run_huff_model(
         "predicted_visits": round(result["total_predicted_visits"], 2),
         "market_share": round(result["market_share"], 6),
         "runtime_ms": round(result["runtime_seconds"] * 1000, 2),
+        "notes": _build_notes(result),
         "competitors": competitors_sample,
         "top_cbgs": competitors_sample,
     }
