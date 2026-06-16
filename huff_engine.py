@@ -1,4 +1,4 @@
-"""
+""" 
 Azure SQL Huff Engine
 
 This version removes the local SQLite dependency and queries Azure SQL through db.py.
