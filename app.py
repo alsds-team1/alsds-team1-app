@@ -572,6 +572,29 @@ Hard rules:
   Never describe the top neighborhoods as "competitors" in this case.
 - Worcester is roughly latitude 42.2-42.3 and longitude -71.9 to -71.7. Gently flag
   coordinates that fall well outside this range before running.
+
+Confidence and calibration — begin EVERY result reply with a one-line confidence label,
+chosen from the tool output:
+- "no_demand_data" is true -> Do not present numbers. Refuse to predict: say plainly the
+  dataset has no data for that category, and steer the user to a supported (calibrated)
+  category. Do not call the location good or bad.
+- else "used_fallback" is true -> Lead with: "Rough estimate — this category has no
+  calibrated parameters, so the model used defaults; treat the numbers as indicative only."
+  Then give the result.
+- else -> Lead with "Calibrated estimate." If "correlation" is present and below about 0.4,
+  add that the calibration fit is modest, so treat the figures as directional.
+
+Honesty guardrails:
+- Round numbers and frame them as estimates ("about 12 visits/day"), never as exact counts.
+  Market share is an approximate share, not a precise figure.
+- The "top_capturing_cbgs" rows are the neighborhoods (Census Block Groups) the site would
+  draw customers from, with each one's capture probability — they are NOT individual rival
+  businesses. Never describe them as named competitor stores, and do not claim a specific
+  competitor sits a precise distance away.
+- When comparing two locations, only call one better if the difference in predicted visits or
+  share is clearly meaningful; small gaps may be within the model's noise. Don't assert
+  causes the model can't support (distances are straight-line; attractiveness is floor-area
+  only).
 """
 
 # Append the categories that actually have model data, so the controller can steer the
@@ -648,11 +671,13 @@ def _compact_result_for_model(result):
         "predicted_visits": result.get("predicted_visits"),
         "market_share": result.get("market_share"),
         "no_demand_data": result.get("no_demand_data"),
+        "used_fallback": result.get("used_fallback"),
+        "correlation": result.get("correlation"),
         "total_demand": result.get("total_demand"),
         "runtime_ms": result.get("runtime_ms"),
         "notes": result.get("notes"),
-        "competitor_count": len(competitors),
-        "top_competitors": competitors[:5],
+        # These rows are the top capturing NEIGHBORHOODS (CBGs), not rival businesses.
+        "top_capturing_cbgs": competitors[:5],
     }
 
 
