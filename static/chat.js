@@ -1,6 +1,8 @@
 const chatMessages = document.getElementById("chatMessages");
 const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
+// Declare at the global/top level to allow destroying the old chart instance
+let competitorsChart = null; 
 
 // Canonical conversation history (server-authoritative). Holds user / assistant /
 // tool messages in OpenAI format. The system prompt lives on the server, so it is
@@ -167,6 +169,91 @@ function renderResult(result) {
       </tbody>
     </table>
   `;
+}
+
+
+
+function updateCompetitorsChart(competitors) {
+  const section = document.getElementById("chartSection");
+  
+  // Keep the section hidden if there is no competitor data
+  if (!competitors || competitors.length === 0) {
+    section.classList.add("hidden");
+    return;
+  }
+
+  // Remove the 'hidden' class to display the chart section
+  section.classList.remove("hidden");
+
+  // 1. Data processing: sort by attraction in descending order and slice the top 10
+  const top10 = [...competitors]
+    .sort((a, b) => (Number(b.attraction) || 0) - (Number(a.attraction) || 0))
+    .slice(0, 10);
+
+  const labels = top10.map(c => c.name ?? c.poi_name ?? "Unknown");
+  const data = top10.map(c => Number(c.attraction) || 0);
+
+  // 2. Render the chart
+  const ctx = document.getElementById("topCompetitorsChart").getContext("2d");
+
+  // Destroy the existing chart instance before creating a new one to prevent overlay rendering issues
+  if (competitorsChart) {
+    competitorsChart.destroy();
+  }
+
+  competitorsChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "Attraction Score",
+        data: data,
+        backgroundColor: "rgba(54, 162, 235, 0.6)",
+        borderColor: "rgba(54, 162, 235, 1)",
+        borderWidth: 1,
+        borderRadius: 4 // Add a slight curve to the top of the bars
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false, // Allow the chart to fill the height of its parent container
+      plugins: {
+        legend: { display: false } // Hide the unnecessary legend
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: "Attraction Score" }
+        }
+      }
+    }
+  });
+}
+
+function parseCoordinates(text) {
+  /*
+    Supports:
+    42.229212, -71.805525
+    use 42.229212, -71.805525 and rerun...
+  */
+  const match = text.match(/(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
+
+  if (!match) {
+    return null;
+  }
+
+  const lat = Number(match[1]);
+  const lon = Number(match[2]);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null;
+  }
+
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return null;
+  }
+
+  return { lat, lon };
 }
 
 function addBotMessage(text) {
