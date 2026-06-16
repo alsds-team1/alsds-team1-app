@@ -46,14 +46,12 @@
       </div>
     </section>
 
-    <section class="panel result-panel hidden">
-      <h2>Predicted Result</h2>
-      <div id="resultSummarySmall" class="result-summary">
-        No model result yet.
-      </div>
-      <h3>Nearby Competitors / Attraction Scores</h3>
-      <div id="competitorTableSmall" class="table-wrap"></div>
-    </section>
+    <section id="chartSection" class="panel result-panel hidden">
+    <h2>Top 10 Competitors (Attraction Score)</h2>
+    <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
+      <canvas id="topCompetitorsChart"></canvas>
+    </div>
+  </section>
 
     <section class="panel result-panel">
       <h2>Model Result</h2>
@@ -68,6 +66,7 @@
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="/static/map.js"></script>
   <script src="/static/chat.js"></script>
 </body>
