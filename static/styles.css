@@ -1,3 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+/* =========================================================
+   Design tokens (shared by the homepage hero; the tool below
+   keeps its original hard-coded colors untouched)
+   ========================================================= */
+:root {
+  --ink: #0f172a;
+  --body: #475569;
+  --body-soft: #64748b;
+  --hairline: #e2e8f0;
+  --ground: #f8fafc;
+  --surface: #ffffff;
+  --pull: #0ea5a4;        /* teal — matches your active toggle */
+  --pull-deep: #0c807f;
+  --action: #2563eb;      /* blue — matches your primary button */
+  --action-deep: #1d4ed8;
+  --heat: #f59e0b;        /* amber — reserved for the pin + final CTA */
+  --heat-deep: #d97e08;
+  --field-lo: #e6eef2;
+  --field-mid: #9fd0c9;
+  --field-hi: #4fb3a6;
+  --display: 'Space Grotesk', Arial, Helvetica, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
 * {
   box-sizing: border-box;
 }
