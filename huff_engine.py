@@ -1,937 +1,315 @@
-import os
+"""
+Azure SQL Huff Engine
+
+This version removes the local SQLite dependency and queries Azure SQL through db.py.
+It exposes run_huff_model(), which is the function app.py already expects.
+"""
+
+import difflib
 import json
-import re
-from flask import Flask, request, jsonify, render_template
-from openai import AzureOpenAI
-from migrate_to_azure_sql import migrate
+import time
+from typing import Any, Dict, Optional
 
-from db import get_connection, test_connection
-app = Flask(__name__)
+import pandas as pd
+from pyproj import Transformer
 
-
-# -------------------------
-# Azure OpenAI Setup
-# -------------------------
-client = AzureOpenAI(
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-)
-
-DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
-
-NAICS_CALIBRATED = {
-    "3399": "Other Miscellaneous Manufacturing",
-    "4441": "Building Material and Supplies Dealers",
-    "6214": "Outpatient Care Centers",
-    "311811": "Bakeries and Tortilla Manufacturing",
-    "441310": "Automotive Parts, Accessories, and Tire Stores",
-    "445310": "Beer, Wine, and Liquor Stores",
-    "447110": "Gasoline Stations",
-    "448310": "Jewelry, Luggage, and Leather Goods Stores",
-    "452319": "General Merchandise Stores, including Warehouse Clubs and Supercenters",
-    "453991": "Other Miscellaneous Store Retailers",
-    "512240": "Sound Recording Industries",
-    "517312": "Wired and Wireless Telecommunications Carriers",
-    "522110": "Depository Credit Intermediation",
-    "522310": "Activities Related to Credit Intermediation",
-    "523930": "Other Financial Investment Activities",
-    "524113": "Insurance Carriers",
-    "531120": "Lessors of Real Estate",
-    "531210": "Offices of Real Estate Agents and Brokers",
-    "611310": "Colleges, Universities, and Professional Schools",
-    "621210": "Offices of Dentists",
-    "621511": "Medical and Diagnostic Laboratories",
-    "812910": "Other Personal Services",
-    "922110": "Justice, Public Order, and Safety Activities"
-}
-
-NAICS_FALLBACK = {
-    "485": "Transit and Ground Passenger Transportation",
-    "487": "Scenic and Sightseeing Transportation",
-    "562": "Waste Management and Remediation Services",
-    "623": "Nursing and Residential Care Facilities",
-    "2382": "Building Equipment Contractors",
-    "2383": "Building Finishing Contractors",
-    "2389": "Other Specialty Trade Contractors",
-    "3231": "Printing and Related Support Activities",
-    "4238": "Machinery, Equipment, and Supplies Merchant Wholesalers",
-    "4422": "Home Furnishings Stores",
-    "4442": "Lawn and Garden Equipment and Supplies Stores",
-    "4481": "Clothing Stores",
-    "5151": "Radio and Television Broadcasting",
-    "5412": "Accounting, Tax Preparation, Bookkeeping, and Payroll Services",
-    "5414": "Specialized Design Services",
-    "5416": "Management, Scientific, and Technical Consulting Services",
-    "5418": "Advertising, Public Relations, and Related Services",
-    "5616": "Investigation and Security Services",
-    "6115": "Technical and Trade Schools",
-    "6215": "Medical and Diagnostic Laboratories",
-    "6233": "Continuing Care Retirement Communities and Assisted Living Facilities for the Elderly",
-    "6241": "Individual and Family Services",
-    "7111": "Performing Arts Companies",
-    "8111": "Automotive Repair and Maintenance",
-    "8122": "Death Care Services",
-    "9231": "Administration of Human Resource Programs",
-    "9261": "Administration of Economic Programs",
-    "54192": "Other Professional, Scientific, and Technical Services",
-    "81211": "Personal Care Services",
-    "221111": "Electric Power Generation, Transmission and Distribution",
-    "237110": "Utility System Construction",
-    "238140": "Foundation, Structure, and Building Exterior Contractors",
-    "238150": "Foundation, Structure, and Building Exterior Contractors",
-    "238220": "Building Equipment Contractors",
-    "238330": "Building Finishing Contractors",
-    "238390": "Building Finishing Contractors",
-    "312120": "Beverage Manufacturing",
-    "312130": "Beverage Manufacturing",
-    "323113": "Printing and Related Support Activities",
-    "323117": "Printing and Related Support Activities",
-    "335220": "Household Appliance Manufacturing",
-    "339950": "Other Miscellaneous Manufacturing",
-    "423330": "Lumber and Other Construction Materials Merchant Wholesalers",
-    "423450": "Professional and Commercial Equipment and Supplies Merchant Wholesalers",
-    "423610": "Household Appliances and Electrical and Electronic Goods Merchant Wholesalers",
-    "423690": "Household Appliances and Electrical and Electronic Goods Merchant Wholesalers",
-    "423720": "Hardware, and Plumbing and Heating Equipment and Supplies Merchant Wholesalers",
-    "423730": "Hardware, and Plumbing and Heating Equipment and Supplies Merchant Wholesalers",
-    "423740": "Hardware, and Plumbing and Heating Equipment and Supplies Merchant Wholesalers",
-    "423820": "Machinery, Equipment, and Supplies Merchant Wholesalers",
-    "423830": "Machinery, Equipment, and Supplies Merchant Wholesalers",
-    "423850": "Machinery, Equipment, and Supplies Merchant Wholesalers",
-    "423910": "Miscellaneous Durable Goods Merchant Wholesalers",
-    "424210": "Drugs and Druggists' Sundries Merchant Wholesalers",
-    "441110": "Automobile Dealers",
-    "441120": "Automobile Dealers",
-    "441222": "Other Motor Vehicle Dealers",
-    "441228": "Other Motor Vehicle Dealers",
-    "441320": "Automotive Parts, Accessories, and Tire Stores",
-    "442110": "Furniture Stores",
-    "442210": "Home Furnishings Stores",
-    "442299": "Home Furnishings Stores",
-    "443141": "Electronics and Appliance Stores",
-    "443142": "Electronics and Appliance Stores",
-    "444110": "Building Material and Supplies Dealers",
-    "444120": "Building Material and Supplies Dealers",
-    "444130": "Building Material and Supplies Dealers",
-    "444190": "Building Material and Supplies Dealers",
-    "445110": "Grocery Stores",
-    "445120": "Grocery Stores",
-    "445210": "Specialty Food Stores",
-    "445220": "Specialty Food Stores",
-    "445230": "Specialty Food Stores",
-    "445292": "Specialty Food Stores",
-    "445299": "Specialty Food Stores",
-    "446110": "Health and Personal Care Stores",
-    "446120": "Health and Personal Care Stores",
-    "446191": "Health and Personal Care Stores",
-    "446199": "Health and Personal Care Stores",
-    "448140": "Clothing Stores",
-    "448190": "Clothing Stores",
-    "448210": "Shoe Stores",
-    "448320": "Jewelry, Luggage, and Leather Goods Stores",
-    "451110": "Sporting Goods, Hobby, and Musical Instrument Stores",
-    "451120": "Sporting Goods, Hobby, and Musical Instrument Stores",
-    "451130": "Sporting Goods, Hobby, and Musical Instrument Stores",
-    "451140": "Sporting Goods, Hobby, and Musical Instrument Stores",
-    "451211": "Book Stores and News Dealers",
-    "452210": "Department Stores",
-    "452311": "General Merchandise Stores, including Warehouse Clubs and Supercenters",
-    "453110": "Florists",
-    "453210": "Office Supplies, Stationery, and Gift Stores",
-    "453220": "Office Supplies, Stationery, and Gift Stores",
-    "453310": "Used Merchandise Stores",
-    "453910": "Other Miscellaneous Store Retailers",
-    "453920": "Other Miscellaneous Store Retailers",
-    "453998": "Other Miscellaneous Store Retailers",
-    "484210": "Specialized Freight Trucking",
-    "485210": "Interurban and Rural Bus Transportation",
-    "485310": "Taxi and Limousine Service",
-    "485999": "Other Transit and Ground Passenger Transportation",
-    "488119": "Support Activities for Air Transportation",
-    "488190": "Support Activities for Air Transportation",
-    "488410": "Support Activities for Road Transportation",
-    "488510": "Freight Transportation Arrangement",
-    "491110": "Postal Service",
-    "492110": "Couriers and Express Delivery Services",
-    "512131": "Motion Picture and Video Industries",
-    "515210": "Cable and Other Subscription Programming",
-    "518210": "Data Processing, Hosting, and Related Services",
-    "519120": "Other Information Services",
-    "522130": "Depository Credit Intermediation",
-    "522298": "Nondepository Credit Intermediation",
-    "522390": "Activities Related to Credit Intermediation",
-    "523999": "Other Financial Investment Activities",
-    "524210": "Agencies, Brokerages, and Other Insurance Related Activities",
-    "531110": "Lessors of Real Estate",
-    "531130": "Lessors of Real Estate",
-    "531190": "Lessors of Real Estate",
-    "531311": "Activities Related to Real Estate",
-    "532111": "Automotive Equipment Rental and Leasing",
-    "532120": "Automotive Equipment Rental and Leasing",
-    "532282": "Consumer Goods Rental",
-    "532284": "Consumer Goods Rental",
-    "532289": "Consumer Goods Rental",
-    "532310": "General Rental Centers",
-    "532412": "Commercial and Industrial Machinery and Equipment Rental and Leasing",
-    "532490": "Commercial and Industrial Machinery and Equipment Rental and Leasing",
-    "541120": "Legal Services",
-    "541213": "Accounting, Tax Preparation, Bookkeeping, and Payroll Services",
-    "541219": "Accounting, Tax Preparation, Bookkeeping, and Payroll Services",
-    "541940": "Other Professional, Scientific, and Technical Services",
-    "551114": "Management of Companies and Enterprises",
-    "561320": "Employment Services",
-    "561720": "Services to Buildings and Dwellings",
-    "561730": "Services to Buildings and Dwellings",
-    "561790": "Services to Buildings and Dwellings",
-    "562211": "Waste Treatment and Disposal",
-    "611110": "Elementary and Secondary Schools",
-    "611210": "Junior Colleges",
-    "611511": "Technical and Trade Schools",
-    "611519": "Technical and Trade Schools",
-    "611620": "Other Schools and Instruction",
-    "611630": "Other Schools and Instruction",
-    "611691": "Other Schools and Instruction",
-    "611692": "Other Schools and Instruction",
-    "611699": "Other Schools and Instruction",
-    "621111": "Offices of Physicians",
-    "621112": "Offices of Physicians",
-    "621310": "Offices of Other Health Practitioners",
-    "621320": "Offices of Other Health Practitioners",
-    "621330": "Offices of Other Health Practitioners",
-    "621340": "Offices of Other Health Practitioners",
-    "621399": "Offices of Other Health Practitioners",
-    "621420": "Outpatient Care Centers",
-    "621492": "Outpatient Care Centers",
-    "621493": "Outpatient Care Centers",
-    "621498": "Outpatient Care Centers",
-    "621610": "Home Health Care Services",
-    "621991": "Other Ambulatory Health Care Services",
-    "622110": "General Medical and Surgical Hospitals",
-    "622210": "Psychiatric and Substance Abuse Hospitals",
-    "622310": "Specialty (except Psychiatric and Substance Abuse) Hospitals",
-    "623110": "Nursing Care Facilities (Skilled Nursing Facilities)",
-    "623312": "Continuing Care Retirement Communities and Assisted Living Facilities for the Elderly",
-    "624110": "Individual and Family Services",
-    "624120": "Individual and Family Services",
-    "624190": "Individual and Family Services",
-    "624221": "Community Food and Housing, and Emergency and Other Relief Services",
-    "624410": "Child Day Care Services",
-    "711211": "Spectator Sports",
-    "711310": "Promoters of Performing Arts, Sports, and Similar Events",
-    "712110": "Museums, Historical Sites, and Similar Institutions",
-    "712120": "Museums, Historical Sites, and Similar Institutions",
-    "712130": "Museums, Historical Sites, and Similar Institutions",
-    "712190": "Museums, Historical Sites, and Similar Institutions",
-    "713110": "Amusement Parks and Arcades",
-    "713210": "Gambling Industries",
-    "713910": "Other Amusement and Recreation Industries",
-    "713940": "Other Amusement and Recreation Industries",
-    "713950": "Other Amusement and Recreation Industries",
-    "713990": "Other Amusement and Recreation Industries",
-    "721110": "Traveler Accommodation",
-    "722320": "Special Food Services",
-    "722410": "Drinking Places (Alcoholic Beverages)",
-    "722511": "Restaurants and Other Eating Places",
-    "722513": "Restaurants and Other Eating Places",
-    "722515": "Restaurants and Other Eating Places",
-    "811111": "Automotive Repair and Maintenance",
-    "811121": "Automotive Repair and Maintenance",
-    "811122": "Automotive Repair and Maintenance",
-    "811191": "Automotive Repair and Maintenance",
-    "811192": "Automotive Repair and Maintenance",
-    "811198": "Automotive Repair and Maintenance",
-    "811211": "Electronic and Precision Equipment Repair and Maintenance",
-    "811412": "Personal and Household Goods Repair and Maintenance",
-    "811420": "Personal and Household Goods Repair and Maintenance",
-    "811430": "Personal and Household Goods Repair and Maintenance",
-    "811490": "Personal and Household Goods Repair and Maintenance",
-    "812112": "Personal Care Services",
-    "812191": "Personal Care Services",
-    "812199": "Personal Care Services",
-    "812210": "Death Care Services",
-    "812220": "Death Care Services",
-    "812320": "Drycleaning and Laundry Services",
-    "812930": "Other Personal Services",
-    "812990": "Other Personal Services",
-    "813110": "Religious Organizations",
-    "813219": "Grantmaking and Giving Services",
-    "813410": "Civic and Social Organizations",
-    "922120": "Justice, Public Order, and Safety Activities",
-    "922160": "Justice, Public Order, and Safety Activities",
-    "926120": "Administration of Economic Programs"
-}
-
-NAICS_WHITELIST = {**NAICS_CALIBRATED, **NAICS_FALLBACK}
+from db import get_connection
 
 
-# -------------------------
-# Routes
-# -------------------------
+def _load_geoid_to_name_mapping(geojson_path: str = "Data/worcester_cbgs_map.geojson") -> Dict[str, Dict[str, str]]:
+    """Load GeoJSON and create a mapping from GEOID10 to a small props dict.
 
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"})
-
-
-@app.route("/dbcheck")
-def dbcheck():
-    try:
-        ok = test_connection()
-        return jsonify({"ok": ok})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-
-
-
-@app.route("/db_structure")
-def db_structure():
-    """Return all Azure SQL user tables with row counts for assignment verification."""
-    try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT
-                    SCHEMA_NAME(t.schema_id) AS schema_name,
-                    t.name AS table_name,
-                    SUM(p.rows) AS row_count
-                FROM sys.tables AS t
-                INNER JOIN sys.partitions AS p
-                    ON t.object_id = p.object_id
-                WHERE p.index_id IN (0, 1)
-                GROUP BY SCHEMA_NAME(t.schema_id), t.name
-                ORDER BY t.name
-                """
-            )
-            rows = cursor.fetchall()
-
-            # Build a single UNION ALL query that fetches up to 5 rows per table as JSON, then execute once
-            table_list = [(schema_name, table_name, int(row_count)) for schema_name, table_name, row_count in rows]
-            preview_selects = []
-            for schema_name, table_name, _ in table_list:
-                # ensure literals are safe in SQL string
-                s_schema = schema_name.replace("'", "''")
-                s_table = table_name.replace("'", "''")
-                preview_sql = (
-                    f"SELECT N'{s_schema}' AS schema_name, N'{s_table}' AS table_name, "
-                    f"ISNULL((SELECT TOP (5) * FROM [{s_schema}].[{s_table}] FOR JSON PATH), '[]') AS preview_json"
-                )
-                preview_selects.append(preview_sql)
-
-            tables = []
-            if preview_selects:
-                combined_sql = "\nUNION ALL\n".join(preview_selects)
-                try:
-                    cursor.execute(combined_sql)
-                    preview_rows = cursor.fetchall()
-                    # preview_rows: list of tuples (schema_name, table_name, preview_json)
-                    preview_map = { (r[0], r[1]): (r[2] or '[]') for r in preview_rows }
-                except Exception:
-                    app.logger.exception("Failed to fetch combined previews")
-                    preview_map = {}
-            else:
-                preview_map = {}
-
-            for schema_name, table_name, row_count in table_list:
-                pj = preview_map.get((schema_name, table_name), '[]')
-                try:
-                    preview = json.loads(pj)
-                except Exception:
-                    app.logger.exception("Failed to parse preview JSON for %s.%s", schema_name, table_name)
-                    preview = []
-
-                tables.append({ 
-                    "schema": schema_name,
-                    "table_name": table_name,
-                    "row_count": int(row_count),
-                    "preview": preview,
-                })
-
-        return jsonify({"ok": True, "tables": tables})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-# -------------------------
-# help function
-# -------------------------
-
-def resolve_naics_code(user_input, naics_whitelist, naics_calibrated, client, deployment):
+    The returned mapping value is a dict containing keys we may use for naming:
+    - 'name' : NAMELSAD10 if present
+    - 'tract': TRACTCE10 if present
+    - 'blk'  : BLKGRPCE10 if present
     """
-    Core logic function to classify business descriptions into NAICS codes.
-    
-    Args:
-        user_input (str): The raw business description provided by the user.
-        naics_whitelist (dict): A dictionary of authorized NAICS codes and names.
-        naics_calibrated (set/list): A collection of NAICS codes with pre-calibrated model parameters.
-        client: The AI model client instance (e.g., OpenAI/Azure client).
-        deployment (str): The specific model or deployment identifier.
+    try:
+        with open(geojson_path, 'r', encoding='utf-8') as f:
+            geojson_data = json.load(f)
 
-    Returns:
-        dict: A structured dictionary containing 'ok' status, and 'data' or 'error' message.
-    """
-    if not user_input or not user_input.strip():
-        return {"ok": False, "error": "No input provided."}
+        mapping: Dict[str, Dict[str, str]] = {}
+        for feature in geojson_data.get("features", []):
+            props = feature.get("properties", {})
+            geoid = props.get("GEOID10")
+            if not geoid:
+                continue
 
-    # Format whitelist into a string for the AI prompt context
-    whitelist_text = "\n".join(f"{code}: {name}" for code, name in naics_whitelist.items())
+            entry: Dict[str, str] = {}
+            if props.get("NAMELSAD10"):
+                entry["name"] = str(props.get("NAMELSAD10"))
+            if props.get("TRACTCE10"):
+                entry["tract"] = str(props.get("TRACTCE10"))
+            if props.get("BLKGRPCE10"):
+                entry["blk"] = str(props.get("BLKGRPCE10"))
 
-    # Define system instructions for the classification task
-    system_prompt = (
-        "You are an expert NAICS code classifier. "
-        "Analyze the business description and return the best matching NAICS code from the whitelist. "
-        "Respond ONLY with a JSON object. Format: "
-        '{"naics_code": "4441", "category_name": "...", "confidence": "high"}'
-        "If no match is reasonable, set confidence to 'low'."
+            mapping[str(geoid)] = entry
+
+        return mapping
+    except Exception as e:
+        # If GeoJSON loading fails, return empty dict
+        # (will fall back to geoid-based naming)
+        print(f"Warning: Could not load GeoJSON mapping: {e}")
+        return {}
+
+
+def _find_category_parameters(conn, user_category: str):
+    """Find category parameters by exact category, NAICS code, substring, or fuzzy match."""
+    params = pd.read_sql(
+        "SELECT top_category, naics_code, alpha, beta, correlation FROM category_parameters",
+        conn,
     )
+    params["top_category"] = params["top_category"].astype(str)
+    params["naics_code"] = params["naics_code"].astype(str)
 
-    try:
-        # Request completion from the model
-        response = client.chat.completions.create(
-            model=deployment,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Business description: {user_input}\n\nWhitelist:\n{whitelist_text}"}
-            ],
-            temperature=0.1
+    query = str(user_category).strip()
+
+    exact = params[params["top_category"].str.lower() == query.lower()]
+    if len(exact) > 0:
+        return exact.iloc[0], False
+
+    naics = params[params["naics_code"] == query]
+    if len(naics) > 0:
+        return naics.iloc[0], False
+
+    contains = params[params["top_category"].str.contains(query, case=False, na=False)]
+    if len(contains) > 0:
+        return contains.iloc[0], False
+
+    matches = difflib.get_close_matches(query, params["top_category"].tolist(), n=1, cutoff=0.55)
+    if matches:
+        return params[params["top_category"] == matches[0]].iloc[0], False
+
+    fallback = pd.Series(
+        {
+            "top_category": query,
+            "naics_code": "Unknown",
+            "alpha": 1.0,
+            "beta": 1.0,
+            "correlation": None,
+        }
+    )
+    return fallback, True
+
+
+def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: float) -> Dict[str, Any]:
+    """Run the Huff model against Azure SQL and return detailed results."""
+    start = time.perf_counter()
+
+    with get_connection() as conn:
+        params, used_fallback = _find_category_parameters(conn, category_query)
+        matched_category = str(params["top_category"])
+        naics_code = str(params["naics_code"]) if not pd.isna(params["naics_code"]) else "Unknown"
+        alpha = float(params["alpha"])
+        beta = float(params["beta"])
+        correlation = None if pd.isna(params["correlation"]) else float(params["correlation"])
+
+        transformer = Transformer.from_crs("EPSG:4326", "EPSG:26919", always_xy=True)
+        new_x, new_y = transformer.transform(float(lon), float(lat))
+
+        # Azure SQL / pyodbc uses ? placeholders. This is parameterized and safe.
+        cbg_data = pd.read_sql(
+            """
+            SELECT
+                c.geoid,
+                c.total_population,
+                c.median_household_income,
+                c.x_26919,
+                c.y_26919,
+                COALESCE(s.total_u_existing,      0) AS total_u_existing,
+                COALESCE(d.total_category_visits, 0) AS total_category_visits
+            FROM cbg_master AS c
+            LEFT JOIN Competitor_Summary AS s
+                ON c.geoid = s.geoid AND s.top_category = ?
+            LEFT JOIN category_demand AS d
+                ON c.geoid = d.geoid AND d.top_category = ?
+            """,
+            conn,
+            params=[matched_category, matched_category],
         )
 
-        raw_content = response.choices[0].message.content.strip()
-        
-        # Clean markdown formatting if present in the model output
-        if "```" in raw_content:
-            raw_content = raw_content.replace("```json", "").replace("```", "").strip()
+    # CBGs without a projected centroid can't be scored. Dropping them keeps NaN
+    # distances out of the totals; otherwise they inflate total demand while
+    # contributing zero predicted visits, which understates market share.
+    total_cbgs = len(cbg_data)
+    cbg_data = cbg_data.dropna(subset=["x_26919", "y_26919"]).copy()
+    dropped_cbgs = total_cbgs - len(cbg_data)
 
-        # Parse AI response to JSON
-        parsed = json.loads(raw_content)
-    except Exception as e:
-        return {"ok": False, "error": f"Model inference or parsing failed: {str(e)}"}
+    cbg_data["new_dist_m"] = (
+        ((cbg_data["x_26919"] - new_x) ** 2 + (cbg_data["y_26919"] - new_y) ** 2) ** 0.5
+    ).clip(lower=0.1)
 
-    naics_code = str(parsed.get("naics_code", "")).strip()
-    
-    # Validate result against the authorized whitelist
-    if naics_code not in naics_whitelist:
-        return {"ok": False, "error": "No matching records found for this business type."}
+    cbg_data["u_new"] = (float(store_area_sq_m) ** alpha) / (cbg_data["new_dist_m"] ** beta)
+    cbg_data["p_new"] = cbg_data["u_new"] / (cbg_data["u_new"] + cbg_data["total_u_existing"])
+    cbg_data["predicted_visits"] = cbg_data["p_new"] * cbg_data["total_category_visits"]
 
-    # Determine metadata based on classification results
-    category_name = parsed.get("category_name", naics_whitelist[naics_code])
-    confidence = parsed.get("confidence", "low")
-    is_fallback = naics_code not in naics_calibrated
+    total_predicted_visits = float(cbg_data["predicted_visits"].sum())
+    total_demand = float(cbg_data["total_category_visits"].sum())
+    total_existing_u = float(cbg_data["total_u_existing"].sum())
+    market_share = float(total_predicted_visits / total_demand) if total_demand else 0.0
+    runtime_seconds = time.perf_counter() - start
 
-    # Construct success response structure
-    result = {
-        "naics_code": naics_code,
-        "category_name": category_name,
-        "is_fallback": is_fallback
-    }
-    
-    # Flag low confidence matches for manual verification
-    if confidence == "low":
-        result["warning"] = "Low confidence match. Please confirm this category."
+    # If there is no demand for this category anywhere in Worcester, the model has
+    # nothing to allocate: predicted visits and market share are 0 by construction,
+    # NOT because the location is bad. Flag this so callers don't misread the zeros.
+    no_demand_data = total_demand <= 0
 
-    return {"ok": True, "data": result}
+    details = cbg_data.sort_values("predicted_visits", ascending=False)
 
-@app.route("/api/trans_naics", methods=["POST"])
-def trans_naics():
-    # 1. Retrieve data
-    data = request.get_json(silent=True) or {}
-    user_input = data.get("user_input", "")
-
-    # 2. Invoke the classifier function
-    res = resolve_naics_code(
-        user_input, 
-        NAICS_WHITELIST, 
-        NAICS_CALIBRATED, 
-        client, 
-        DEPLOYMENT
-    )
-
-    # 3. Handle response
-    if not res["ok"]:
-        return jsonify({"ok": False, "error": res["error"]}), 400
-    
-    return jsonify({"ok": True, **res["data"]})
-
-
-# -------------------------
-# Run Huff Model
-# -------------------------
-
-@app.route("/api/run_huff", methods=["POST"])
-def api_run_huff():
-    try:
-        from huff_engine import run_huff_model
-
-        data = request.get_json()
-
-        candidate_lat = data.get("candidate_lat")
-        candidate_lon = data.get("candidate_lon")
-        business_category = data.get("business_category")
-        floor_area = data.get("floor_area")
-
-        if None in [candidate_lat, candidate_lon, business_category, floor_area]:
-            return jsonify({"ok": False, "error": "Missing required inputs"}), 400
-
-        # use the Flask-friendly wrapper implemented in huff_engine
-        result = run_huff_model(
-            candidate_lat=candidate_lat,
-            candidate_lon=candidate_lon,
-            business_category=business_category,
-            floor_area=floor_area,
-        )
-
-        explanation = generate_explanation(result)
-
-        return jsonify({
-            "ok": True,
-            "result": result,
-            "explanation": explanation
-        })
-
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-# =========================================================
-# AI CONTROLLER  (/api/chat)
-# ---------------------------------------------------------
-# The model drives the conversation and calls the Huff engine
-# as a TOOL. It never computes numbers itself: every figure it
-# states comes from run_huff_model's actual return value.
-# =========================================================
-
-CHAT_SYSTEM_PROMPT = """You are the guided assistant for an AI-Assisted Location \
-Decision Support System for Worcester, Massachusetts. The system evaluates candidate \
-retail/service locations using a Huff gravity model.
-
-Your job:
-- Help the user assemble the four inputs the model needs:
-  (1) business_category as a NAICS code (e.g. 4441),
-  (2) candidate_lat and (3) candidate_lon for the proposed location
-      (the user can also pick this on the map),
-  (4) floor_area in square meters.
-- Ask for whatever is still missing, one or two items at a time, in plain language.
-- As soon as you have all four inputs, call the run_huff_model tool. Do not ask for
-  extra confirmation unless the request is genuinely ambiguous.
-- After the tool returns, explain the results in 3-5 clear sentences: what the predicted
-  visits and market share mean, and what likely drove them.
-
-Hard rules:
-- NEVER invent, estimate, or guess numeric results (predicted visits, market share,
-  distances, attraction scores). Those come ONLY from the run_huff_model tool. If a
-  question needs numbers you don't already have, call the tool.
-- If the user changes any input (location, NAICS, or floor area) and wants new results,
-  call run_huff_model again with the updated values.
-- If the latest tool result already answers the user's question, answer from it directly
-  instead of calling the tool again.
-- Keep replies concise and grounded in the tool output. If you lack information, say
-  exactly what you still need.
-- If the tool result has "no_demand_data": true, the dataset has no demand or competitor
-  data for that category in Worcester. Do NOT interpret the zero visits or zero market
-  share as a market signal, and do not claim the location is good or bad. State plainly
-  that the dataset has no data for that category, so no prediction can be made, and
-  suggest the user try a category the system covers (for example a calibrated NAICS code).
-  Never describe the top neighborhoods as "competitors" in this case.
-- Worcester is roughly latitude 42.2-42.3 and longitude -71.9 to -71.7. Gently flag
-  coordinates that fall well outside this range before running.
-"""
-
-HUFF_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "run_huff_model",
-        "description": (
-            "Run the Huff gravity model for a candidate retail/service location in "
-            "Worcester, MA. Returns predicted visits, estimated market share, and nearby "
-            "competitor attraction scores. Always call this to obtain results; never "
-            "estimate the numbers yourself."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "candidate_lat": {
-                    "type": "number",
-                    "description": "Latitude of the candidate location in decimal degrees (Worcester ~42.2-42.3).",
-                },
-                "candidate_lon": {
-                    "type": "number",
-                    "description": "Longitude of the candidate location in decimal degrees (Worcester ~ -71.9 to -71.7).",
-                },
-                "business_category": {
-                    "type": "string",
-                    "description": "NAICS code for the business category, e.g. '4441'.",
-                },
-                "floor_area": {
-                    "type": "number",
-                    "description": "Proposed store floor area in square meters (positive number).",
-                },
-            },
-            "required": ["candidate_lat", "candidate_lon", "business_category", "floor_area"],
-        },
-    },
-}
-
-
-def _execute_run_huff(args):
-    """Call the real Huff engine and attach the inputs used (so the UI can sync the map)."""
-    from huff_engine import run_huff_model
-
-    result = run_huff_model(
-        candidate_lat=args["candidate_lat"],
-        candidate_lon=args["candidate_lon"],
-        business_category=str(args["business_category"]),
-        floor_area=args["floor_area"],
-    )
-
-    if isinstance(result, dict):
-        result.setdefault("candidate_lat", args["candidate_lat"])
-        result.setdefault("candidate_lon", args["candidate_lon"])
-        result.setdefault("business_category", str(args["business_category"]))
-        result.setdefault("floor_area", args["floor_area"])
-
-    return result
-
-
-def _compact_result_for_model(result):
-    """Trim the tool result before sending it back to the model to save tokens."""
-    competitors = result.get("competitors") or []
     return {
-        "predicted_visits": result.get("predicted_visits"),
-        "market_share": result.get("market_share"),
-        "no_demand_data": result.get("no_demand_data"),
-        "total_demand": result.get("total_demand"),
-        "runtime_ms": result.get("runtime_ms"),
-        "notes": result.get("notes"),
-        "competitor_count": len(competitors),
-        "top_competitors": competitors[:5],
+        "matched_category": matched_category,
+        "naics_code": naics_code,
+        "alpha": alpha,
+        "beta": beta,
+        "correlation": correlation,
+        "used_fallback": bool(used_fallback),
+        "dropped_cbgs": int(dropped_cbgs),
+        "no_demand_data": bool(no_demand_data),
+        "total_demand": total_demand,
+        "total_existing_u": total_existing_u,
+        "total_predicted_visits": total_predicted_visits,
+        "market_share": market_share,
+        "runtime_seconds": runtime_seconds,
+        "details": details,
     }
 
 
-@app.route("/api/chat", methods=["POST"])
-def api_chat():
+def _build_notes(result: Dict[str, Any]) -> str:
+    """Human-readable transparency note for the UI / chatbot.
+
+    Surfaces the calibration state (especially the uncalibrated fallback) and the
+    distance assumption, so a user is never shown confident numbers without context.
     """
-    Stateless chat controller.
+    parts = []
 
-    Request JSON:
-      {
-        "messages": [ {role, content, ...} ],   # full prior history (no system msg)
-        "selected_location": {"lat": .., "lon": ..} | null
-      }
+    if result.get("no_demand_data"):
+        parts.append(
+            f"No demand data exists for '{result['matched_category']}' in Worcester, so the "
+            f"model cannot estimate visits or market share for this category — the zero "
+            f"values are a data gap, not a prediction. Try a category the dataset covers."
+        )
 
-    Response JSON:
-      {
-        "ok": true,
-        "reply": "<assistant text>",
-        "messages": [ ...updated history... ],   # store and resend this next turn
-        "huff_result": { ...full model output... } | null
-      }
+    if result.get("used_fallback"):
+        parts.append(
+            f"No calibrated parameters were found for '{result['matched_category']}', "
+            f"so default values (alpha=1.0, beta=1.0) were used — treat these results as rough."
+        )
+    elif not result.get("no_demand_data"):
+        naics = result.get("naics_code")
+        naics_str = f", NAICS {naics}" if naics and naics != "Unknown" else ""
+        parts.append(
+            f"Category matched: {result['matched_category']}{naics_str} "
+            f"(alpha={result['alpha']:.3g}, beta={result['beta']:.3g})."
+        )
+
+    corr = result.get("correlation")
+    if corr is not None:
+        parts.append(f"Calibration correlation: {corr:.3g}.")
+
+    parts.append("Distances are straight-line from neighborhood (CBG) centroids.")
+
+    dropped = result.get("dropped_cbgs", 0)
+    if dropped:
+        parts.append(f"{dropped} CBG(s) without centroid coordinates were excluded.")
+
+    return " ".join(parts)
+
+
+def run_huff_model(
+    candidate_lat: float,
+    candidate_lon: float,
+    business_category: str,
+    floor_area: float,
+    db_connection: Optional[Any] = None,
+) -> Dict[str, Any]:
     """
-    try:
-        data = request.get_json(force=True) or {}
-        client_messages = data.get("messages") or []
-        selected = data.get("selected_location")
+    Flask/API-friendly wrapper expected by app.py.
 
-        # Build the working conversation: system prompt + optional map context + history.
-        convo = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
-        if selected and selected.get("lat") is not None and selected.get("lon") is not None:
-            convo.append({
-                "role": "system",
-                "content": (
-                    f"The user has currently selected this candidate location on the map: "
-                    f"latitude {selected['lat']}, longitude {selected['lon']}. Treat these as "
-                    f"the candidate coordinates unless the user provides different ones."
-                ),
-            })
-        convo.extend(client_messages)
+    db_connection is accepted for compatibility with the provided starter app, but this
+    engine uses get_connection() from db.py so Azure SQL is always used.
+    """
+    result = predict_site(candidate_lat, candidate_lon, business_category, floor_area)
+    details = result["details"]
 
-        new_messages = list(client_messages)  # history we will return to the client
-        huff_result = None
-        reply_text = None
+    top_cbg_rows = details[
+        ["geoid", "total_category_visits", "total_u_existing", "new_dist_m", "p_new", "predicted_visits"]
+    ].head(10)
 
-        # Tool-calling loop, capped to avoid runaway calls.
-        for _ in range(5):
-            response = client.chat.completions.create(
-                model=DEPLOYMENT,
-                messages=convo,
-                tools=[HUFF_TOOL],
-                tool_choice="auto",
-                temperature=0.3,
-            )
-            msg = response.choices[0].message
+    # Convert to frontend-expected format for the competitors table
+    # Load GeoJSON mapping for better CBG names
+    geoid_to_name = _load_geoid_to_name_mapping()
 
-            assistant_entry = {"role": "assistant", "content": msg.content}
-            if msg.tool_calls:
-                assistant_entry["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in msg.tool_calls
-                ]
-            convo.append(assistant_entry)
-            new_messages.append(assistant_entry)
+    competitors_sample = []
+    for idx, row in top_cbg_rows.iterrows():
+        geoid = str(row['geoid'])
 
-            # No tool call -> this is the final natural-language reply.
-            if not msg.tool_calls:
-                reply_text = msg.content or ""
-                break
+        cbg_name = None
+        meta = geoid_to_name.get(geoid, {})
 
-            # Execute each requested tool call and feed results back to the model.
-            for tc in msg.tool_calls:
-                if tc.function.name == "run_huff_model":
-                    try:
-                        args = json.loads(tc.function.arguments or "{}")
-                        result = _execute_run_huff(args)
-                        huff_result = result  # keep full result for the front-end
-                        tool_payload = _compact_result_for_model(result)
-                    except Exception as ex:
-                        app.logger.exception("run_huff_model tool failed")
-                        tool_payload = {"error": str(ex)}
-                else:
-                    tool_payload = {"error": f"Unknown tool: {tc.function.name}"}
+        # Prefer explicit tract and blk from GeoJSON if available
+        tract_val = meta.get('tract')
+        blk_val = meta.get('blk')
+        if tract_val and blk_val:
+            # Ensure block group is two digits with leading zero if needed
+            try:
+                blk_int = int(blk_val)
+                blk_str = f"{blk_int:02d}"
+            except Exception:
+                blk_str = str(blk_val).zfill(2)
 
-                tool_entry = {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": json.dumps(tool_payload),
-                }
-                convo.append(tool_entry)
-                new_messages.append(tool_entry)
+            # Tract in GeoJSON may be like '731204' or '7312' depending on source; normalize to last 4-5 digits
+            tract = tract_val
+            # If tract looks longer than 4-5, keep as-is; otherwise use it directly
+            cbg_name = f"Tract {tract}, Block Group {blk_str}"
+
+        elif geoid in geoid_to_name and meta.get('name'):
+            # Fallback to NAMELSAD10 text
+            cbg_name = meta.get('name')
+
         else:
-            # Loop exhausted without a plain-text reply.
-            reply_text = reply_text or (
-                "I wasn't able to finish that request. Could you rephrase or restate the inputs?"
-            )
+            # Final fallback: parse from geoid string
+            if len(geoid) >= 12:
+                tract = geoid[5:10]
+                block = geoid[10:12]
+                # Zero-pad block group to 2 digits
+                try:
+                    block_int = int(block)
+                    block_str = f"{block_int:02d}"
+                except Exception:
+                    block_str = block
 
-        return jsonify({
-            "ok": True,
-            "reply": reply_text or "",
-            "messages": new_messages,
-            "huff_result": huff_result,
+                cbg_name = f"Tract {tract}, Block Group {block_str}"
+            else:
+                cbg_name = f"CBG {geoid}"
+
+        competitors_sample.append({
+            "name": cbg_name,
+            "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
+            "size": int(row["total_category_visits"]),
+            "attraction": round(row["p_new"], 4),
+            # Also keep raw data for backend use
+            "geoid": row["geoid"],
+            "predicted_visits": round(row["predicted_visits"], 2),
         })
 
-    except Exception as e:
-        app.logger.exception("api_chat failed")
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-# -------------------------
-# Ask Follow-up Questions  (legacy; superseded by /api/chat)
-# -------------------------
-
-@app.route("/api/ask", methods=["POST"])
-def api_ask():
-    try:
-        data = request.get_json()
-        question = data.get("question")
-        result = data.get("result")
-
-        if not question or not result:
-            return jsonify({"ok": False, "error": "Missing question or result"}), 400
-
-        answer = answer_question(question, result)
-
-        return jsonify({"ok": True, "answer": answer})
-
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-# -------------------------
-# LLM Functions  (used by the legacy /api/run_huff and /api/ask endpoints)
-# -------------------------
-
-def generate_explanation(result):
-    prompt = f"""
-You are an expert in retail location analytics.
-
-A Huff-style gravity model has been run with the following results:
-
-Predicted visits: {result.get("predicted_visits")}
-Market share: {result.get("market_share")}
-Runtime (ms): {result.get("runtime_ms")}
-
-Competitors (sample):
-{result.get("competitors")[:3]}
-
-Explain clearly:
-1. What the predicted visits and market share mean
-2. What factors likely influenced the result
-3. Keep it short and intuitive (3-5 sentences)
-"""
-
-    response = client.chat.completions.create(
-        model=DEPLOYMENT,
-        messages=[
-            {"role": "system", "content": "You explain analytics results clearly."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.4
-    )
-
-    return response.choices[0].message.content
-
-
-def answer_question(question, result):
-    prompt = f"""
-You are assisting with a retail location analysis using a Huff model.
-
-Model result:
-{result}
-
-User question:
-{question}
-
-Answer clearly and concisely, grounded in the model output.
-Do not invent data.
-"""
-
-    response = client.chat.completions.create(
-        model=DEPLOYMENT,
-        messages=[
-            {"role": "system", "content": "You are a helpful data science assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.5
-    )
-
-    return response.choices[0].message.content
-
-# -------------------------
-# Run locally
-# -------------------------
-
-
-# @app.route('/admin/create_tables', methods=['GET', 'POST'])
-# def admin_create_tables():
-
-#     key = request.args.get('key', '')
-#     if key != '12345678':
-#         return jsonify({'ok': False, 'error': 'Unauthorized or missing key'}), 401
-
-#     sql_path = os.path.join(app.root_path, 'sql', 'create_tables.sql')
-#     if not os.path.exists(sql_path):
-#         return jsonify({'ok': False, 'error': f'SQL file not found at {sql_path}'}), 400
-
-#     try:
-#         with open(sql_path, 'r', encoding='utf-8') as f:
-#             sql_text = f.read()
-
-#         # split on GO statements that are on their own line, ignoring case and surrounding whitespace
-#         blocks = [b.strip() for b in re.split(r'^\s*GO\s*$', sql_text, flags=re.IGNORECASE | re.MULTILINE) if b.strip()]
-
-#         with get_connection() as conn:
-#             cursor = conn.cursor()
-#             for block in blocks:
-#                 try:
-#                     cursor.execute(block)
-#                 except Exception as ex:
-#                     # log the error and the block that caused it, but continue with the next blocks
-#                     app.logger.exception('Failed to execute SQL block')
-#                     return jsonify({'ok': False, 'error': f'DDL Execution Failed: {str(ex)}', 'sql_block': block}), 500
-            
-#             conn.commit()
-
-#         return jsonify({'ok': True, 'msg': 'Tables created successfully'})
-
-#     except Exception as e:
-#         app.logger.exception('create_tables failed')
-#         return jsonify({'ok': False, 'error': str(e)}), 500
-    
-# @app.route('/admin/insert_geojson', methods=['GET', 'POST'])
-# def admin_insert_geojson():
-#     """
-#     Read `worcester_cbgs_map.geojson` and insert/update features into the `dbo.cbg_geometries` table.
-
-#     Access control: requires query parameter `key=12345678`.
-#     """
-#     key = request.args.get('key', '')
-#     if key != '12345678':
-#         return jsonify({'ok': False, 'error': 'Unauthorized or missing key'}), 401
-
-#     geojson_path = os.path.join(app.root_path, 'static', 'data', 'worcester_cbgs_map.geojson')
-#     if not os.path.exists(geojson_path):
-#         return jsonify({'ok': False, 'error': f'GeoJSON not found at {geojson_path}'}), 400
-
-#     try:
-#         with open(geojson_path, 'r', encoding='utf-8') as gf:
-#             gj = json.load(gf)
-
-#         features = gj.get('features', [])
-#         inserted = 0
-#         errors = []
-
-#         with get_connection() as conn:
-#             cursor = conn.cursor()
-#             for feat in features:
-#                 props = feat.get('properties') or {}
-#                 geoid = props.get('GEOID10') or props.get('GEOID') or props.get('geoid')
-#                 geometry = feat.get('geometry')
-
-#                 if not geoid:
-#                     errors.append({'reason': 'missing geoid', 'properties': props})
-#                     continue
-
-#                 geom_json = json.dumps(geometry, ensure_ascii=False)
-
-#                 try:
-#                     # Check existence and perform upsert (update if exists, insert otherwise)
-#                     cursor.execute('SELECT 1 FROM dbo.cbg_geometries WHERE geoid = ?', (geoid,))
-#                     if cursor.fetchone():
-#                         cursor.execute('UPDATE dbo.cbg_geometries SET geometry = ? WHERE geoid = ?', (geom_json, geoid))
-#                     else:
-#                         cursor.execute('INSERT INTO dbo.cbg_geometries (geoid, geometry) VALUES (?, ?)', (geoid, geom_json))
-#                     inserted += 1
-#                 except Exception as ex:
-#                     # Record per-row insertion error and continue processing other features
-#                     errors.append({'geoid': geoid, 'error': str(ex)})
-
-#             conn.commit()
-
-#         return jsonify({'ok': True, 'inserted': inserted, 'errors': errors})
-
-#     except Exception as e:
-#         app.logger.exception('insert_geojson failed')
-#         return jsonify({'ok': False, 'error': str(e)}), 500
-
-@app.route("/api/get_cbg_map", methods=["GET"])
-def get_cbg_map():
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT geoid, geometry FROM cbg_geometries")
-        rows = cursor.fetchall()
-        conn.close()
-
-        features = []
-        for row in rows:
-            geoid = row[0]
-            geometry = json.loads(row[1])
-            features.append({
-                "type": "Feature",
-                "properties": {"geoid": geoid},
-                "geometry": geometry
-            })
-
-        return jsonify({
-            "type": "FeatureCollection",
-            "features": features
-        })
-
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    return {
+        "matched_category": result["matched_category"],
+        "naics_code": result["naics_code"],
+        "alpha": result["alpha"],
+        "beta": result["beta"],
+        "correlation": result["correlation"],
+        "used_fallback": result["used_fallback"],
+        "no_demand_data": result["no_demand_data"],
+        "total_demand": round(result["total_demand"], 2),
+        "predicted_visits": round(result["total_predicted_visits"], 2),
+        "market_share": round(result["market_share"], 6),
+        "runtime_ms": round(result["runtime_seconds"] * 1000, 2),
+        "notes": _build_notes(result),
+        "competitors": competitors_sample,
+        "top_cbgs": competitors_sample,
+    }
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    output = run_huff_model(42.27, -71.80, "Liquor Stores", 2500.0)
+    print(output)
