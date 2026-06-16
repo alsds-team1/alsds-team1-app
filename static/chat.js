@@ -233,6 +233,7 @@ function removeMessage(el) {
   }
 }
 
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
