@@ -61,14 +61,20 @@ async function handleSend() {
     }
 
     if (state.step === "category") {
-      const naicsCode = text.trim();
+      const response = await fetch("/api/trans_naics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_input: text.trim() })
+      });
 
-      if (!/^\d+$/.test(naicsCode)) {
-        addBotMessage("Please enter a numeric NAICS code. For example: 4441.");
+      const data = await response.json();
+
+      if (!data.ok) {
+        addBotMessage(data.error || "I'm sorry, I couldn't identify that business type. Please try again with a more specific industry description, such as 'Beer, Wine, and Liquor Stores', 'Bakeries and Tortilla Manufacturing', or 'Building Material and Supplies Dealers'.");
         return;
       }
 
-      state.business_category = naicsCode;
+      state.business_category = data.naics_code;
       state.step = "location";
 
       addBotMessage(
