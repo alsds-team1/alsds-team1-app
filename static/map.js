@@ -109,24 +109,28 @@ window.setCandidateLocation = setCandidateLocation;
 window.getCandidateLocation = getCandidateLocation;
 window.plotCompetitors = plotCompetitors;
 
-// Toggle view functions
+// -------------------------
+// Map / Result toggle
+// -------------------------
+// There are now TWO .result-panel sections (the chart and the model result),
+// so we toggle ALL of them together against the map.
 function showMapView() {
   document.querySelector('.map-panel').classList.remove('hidden');
-  document.querySelector('.result-panel').classList.add('hidden');
+  document.querySelectorAll('.result-panel').forEach(p => p.classList.add('hidden'));
   document.getElementById('showMapBtn').classList.add('active');
   document.getElementById('showResultBtn').classList.remove('active');
-  // Leaflet needs to invalidate size when container becomes visible
+  // Leaflet needs to recompute size when its container becomes visible again.
   setTimeout(() => { map.invalidateSize(); }, 100);
 }
 
 function showResultView() {
-  document.querySelector('.result-panel').classList.remove('hidden');
   document.querySelector('.map-panel').classList.add('hidden');
+  document.querySelectorAll('.result-panel').forEach(p => p.classList.remove('hidden'));
   document.getElementById('showResultBtn').classList.add('active');
   document.getElementById('showMapBtn').classList.remove('active');
 }
 
-// Bind buttons after DOM is ready
+// Bind buttons and set a consistent initial state (map shown, results hidden).
 document.addEventListener('DOMContentLoaded', () => {
   const mapBtn = document.getElementById('showMapBtn');
   const resultBtn = document.getElementById('showResultBtn');
@@ -134,6 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
     mapBtn.addEventListener('click', showMapView);
     resultBtn.addEventListener('click', showResultView);
   }
+  showMapView();
 });
 
 // Expose toggle functions
