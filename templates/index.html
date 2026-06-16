@@ -12,7 +12,6 @@
 <body>
   <!-- ===========================================================
        ALSDS homepage hero. Styling lives in styles.css (.als-* rules).
-       The CTA buttons link to #tool, which is the <main class="layout">.
        =========================================================== -->
   <div class="als-root">
   <div class="als-wrap">
@@ -85,22 +84,19 @@
       </div>
     </section>
 
-    <!-- HOW IT WORKS -->
+    <!-- HOW IT WORKS (framed, no 01/02/03 numbers) -->
     <section class="als-section" id="how">
       <p class="als-section-label">How it works</p>
       <div class="als-steps">
         <div class="als-step">
-          <span class="als-step-num">01</span>
           <h3>Drop a pin</h3>
           <p>Click anywhere on the Worcester map to propose a candidate location.</p>
         </div>
         <div class="als-step">
-          <span class="als-step-num">02</span>
           <h3>Run the model</h3>
           <p>The Huff gravity model weighs your site against every competitor nearby, neighborhood by neighborhood.</p>
         </div>
         <div class="als-step">
-          <span class="als-step-num">03</span>
           <h3>Read the trade area</h3>
           <p>See which neighborhoods you're likely to capture — and where competitors hold their ground.</p>
         </div>
@@ -178,38 +174,41 @@
       </div>
     </section>
 
-    <div class="right-toggle-row">
-      <button id="showMapBtn" class="toggle-btn active">return map</button>
-      <button id="showResultBtn" class="toggle-btn">check predicted result</button>
-    </div>
+    <!-- Right-hand working column: toggles + map + results stacked -->
+    <div class="work-col">
+      <div class="right-toggle-row">
+        <button id="showMapBtn" class="toggle-btn active">Return to map</button>
+        <button id="showResultBtn" class="toggle-btn">Check predicted result</button>
+      </div>
 
-    <section class="panel map-panel">
-      <div id="mapContainer" class="map-container">
-        <h2>Map</h2>
-        <div id="map"></div>
-        <div id="selectedLocation" class="selected-location">
-          No candidate location selected yet.
+      <section class="panel map-panel">
+        <div id="mapContainer" class="map-container">
+          <h2>Map</h2>
+          <div id="map"></div>
+          <div id="selectedLocation" class="selected-location">
+            No candidate location selected yet.
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section id="chartSection" class="panel result-panel hidden">
-      <h2>Top 10 Competitors (Attraction Score)</h2>
-      <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
-        <canvas id="topCompetitorsChart"></canvas>
-      </div>
-    </section>
+      <section id="chartSection" class="panel result-panel hidden">
+        <h2>Top 10 Competitors (Attraction Score)</h2>
+        <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
+          <canvas id="topCompetitorsChart"></canvas>
+        </div>
+      </section>
 
-    <section class="panel result-panel">
-      <h2>Model Result</h2>
+      <section id="modelResultPanel" class="panel result-panel hidden">
+        <h2>Model Result</h2>
 
-      <div id="resultSummary" class="result-summary">
-        No model result yet.
-      </div>
+        <div id="resultSummary" class="result-summary">
+          No model result yet.
+        </div>
 
-      <h3>Nearby Competitors / Attraction Scores</h3>
-      <div id="competitorTable" class="table-wrap"></div>
-    </section>
+        <h3>Nearby Competitors / Attraction Scores</h3>
+        <div id="competitorTable" class="table-wrap"></div>
+      </section>
+    </div>
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
