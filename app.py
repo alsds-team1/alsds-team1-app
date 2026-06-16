@@ -159,8 +159,227 @@ def api_run_huff():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# =========================================================
+# AI CONTROLLER  (/api/chat)
+# ---------------------------------------------------------
+# The model drives the conversation and calls the Huff engine
+# as a TOOL. It never computes numbers itself: every figure it
+# states comes from run_huff_model's actual return value.
+# =========================================================
+
+CHAT_SYSTEM_PROMPT = """You are the guided assistant for an AI-Assisted Location \
+Decision Support System for Worcester, Massachusetts. The system evaluates candidate \
+retail/service locations using a Huff gravity model.
+
+Your job:
+- Help the user assemble the four inputs the model needs:
+  (1) business_category as a NAICS code (e.g. 4441),
+  (2) candidate_lat and (3) candidate_lon for the proposed location
+      (the user can also pick this on the map),
+  (4) floor_area in square meters.
+- Ask for whatever is still missing, one or two items at a time, in plain language.
+- As soon as you have all four inputs, call the run_huff_model tool. Do not ask for
+  extra confirmation unless the request is genuinely ambiguous.
+- After the tool returns, explain the results in 3-5 clear sentences: what the predicted
+  visits and market share mean, and what likely drove them.
+
+Hard rules:
+- NEVER invent, estimate, or guess numeric results (predicted visits, market share,
+  distances, attraction scores). Those come ONLY from the run_huff_model tool. If a
+  question needs numbers you don't already have, call the tool.
+- If the user changes any input (location, NAICS, or floor area) and wants new results,
+  call run_huff_model again with the updated values.
+- If the latest tool result already answers the user's question, answer from it directly
+  instead of calling the tool again.
+- Keep replies concise and grounded in the tool output. If you lack information, say
+  exactly what you still need.
+- Worcester is roughly latitude 42.2-42.3 and longitude -71.9 to -71.7. Gently flag
+  coordinates that fall well outside this range before running.
+"""
+
+HUFF_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "run_huff_model",
+        "description": (
+            "Run the Huff gravity model for a candidate retail/service location in "
+            "Worcester, MA. Returns predicted visits, estimated market share, and nearby "
+            "competitor attraction scores. Always call this to obtain results; never "
+            "estimate the numbers yourself."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "candidate_lat": {
+                    "type": "number",
+                    "description": "Latitude of the candidate location in decimal degrees (Worcester ~42.2-42.3).",
+                },
+                "candidate_lon": {
+                    "type": "number",
+                    "description": "Longitude of the candidate location in decimal degrees (Worcester ~ -71.9 to -71.7).",
+                },
+                "business_category": {
+                    "type": "string",
+                    "description": "NAICS code for the business category, e.g. '4441'.",
+                },
+                "floor_area": {
+                    "type": "number",
+                    "description": "Proposed store floor area in square meters (positive number).",
+                },
+            },
+            "required": ["candidate_lat", "candidate_lon", "business_category", "floor_area"],
+        },
+    },
+}
+
+
+def _execute_run_huff(args):
+    """Call the real Huff engine and attach the inputs used (so the UI can sync the map)."""
+    from huff_engine import run_huff_model
+
+    result = run_huff_model(
+        candidate_lat=args["candidate_lat"],
+        candidate_lon=args["candidate_lon"],
+        business_category=str(args["business_category"]),
+        floor_area=args["floor_area"],
+    )
+
+    if isinstance(result, dict):
+        result.setdefault("candidate_lat", args["candidate_lat"])
+        result.setdefault("candidate_lon", args["candidate_lon"])
+        result.setdefault("business_category", str(args["business_category"]))
+        result.setdefault("floor_area", args["floor_area"])
+
+    return result
+
+
+def _compact_result_for_model(result):
+    """Trim the tool result before sending it back to the model to save tokens."""
+    competitors = result.get("competitors") or []
+    return {
+        "predicted_visits": result.get("predicted_visits"),
+        "market_share": result.get("market_share"),
+        "runtime_ms": result.get("runtime_ms"),
+        "notes": result.get("notes"),
+        "competitor_count": len(competitors),
+        "top_competitors": competitors[:5],
+    }
+
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    """
+    Stateless chat controller.
+
+    Request JSON:
+      {
+        "messages": [ {role, content, ...} ],   # full prior history (no system msg)
+        "selected_location": {"lat": .., "lon": ..} | null
+      }
+
+    Response JSON:
+      {
+        "ok": true,
+        "reply": "<assistant text>",
+        "messages": [ ...updated history... ],   # store and resend this next turn
+        "huff_result": { ...full model output... } | null
+      }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        client_messages = data.get("messages") or []
+        selected = data.get("selected_location")
+
+        # Build the working conversation: system prompt + optional map context + history.
+        convo = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+        if selected and selected.get("lat") is not None and selected.get("lon") is not None:
+            convo.append({
+                "role": "system",
+                "content": (
+                    f"The user has currently selected this candidate location on the map: "
+                    f"latitude {selected['lat']}, longitude {selected['lon']}. Treat these as "
+                    f"the candidate coordinates unless the user provides different ones."
+                ),
+            })
+        convo.extend(client_messages)
+
+        new_messages = list(client_messages)  # history we will return to the client
+        huff_result = None
+        reply_text = None
+
+        # Tool-calling loop, capped to avoid runaway calls.
+        for _ in range(5):
+            response = client.chat.completions.create(
+                model=DEPLOYMENT,
+                messages=convo,
+                tools=[HUFF_TOOL],
+                tool_choice="auto",
+                temperature=0.3,
+            )
+            msg = response.choices[0].message
+
+            assistant_entry = {"role": "assistant", "content": msg.content}
+            if msg.tool_calls:
+                assistant_entry["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ]
+            convo.append(assistant_entry)
+            new_messages.append(assistant_entry)
+
+            # No tool call -> this is the final natural-language reply.
+            if not msg.tool_calls:
+                reply_text = msg.content or ""
+                break
+
+            # Execute each requested tool call and feed results back to the model.
+            for tc in msg.tool_calls:
+                if tc.function.name == "run_huff_model":
+                    try:
+                        args = json.loads(tc.function.arguments or "{}")
+                        result = _execute_run_huff(args)
+                        huff_result = result  # keep full result for the front-end
+                        tool_payload = _compact_result_for_model(result)
+                    except Exception as ex:
+                        app.logger.exception("run_huff_model tool failed")
+                        tool_payload = {"error": str(ex)}
+                else:
+                    tool_payload = {"error": f"Unknown tool: {tc.function.name}"}
+
+                tool_entry = {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(tool_payload),
+                }
+                convo.append(tool_entry)
+                new_messages.append(tool_entry)
+        else:
+            # Loop exhausted without a plain-text reply.
+            reply_text = reply_text or (
+                "I wasn't able to finish that request. Could you rephrase or restate the inputs?"
+            )
+
+        return jsonify({
+            "ok": True,
+            "reply": reply_text or "",
+            "messages": new_messages,
+            "huff_result": huff_result,
+        })
+
+    except Exception as e:
+        app.logger.exception("api_chat failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # -------------------------
-# Ask Follow-up Questions
+# Ask Follow-up Questions  (legacy; superseded by /api/chat)
 # -------------------------
 
 @app.route("/api/ask", methods=["POST"])
@@ -182,7 +401,7 @@ def api_ask():
 
 
 # -------------------------
-# LLM Functions
+# LLM Functions  (used by the legacy /api/run_huff and /api/ask endpoints)
 # -------------------------
 
 def generate_explanation(result):
@@ -324,7 +543,7 @@ def admin_insert_geojson():
                     if cursor.fetchone():
                         cursor.execute('UPDATE dbo.cbg_geometries SET geometry = ? WHERE geoid = ?', (geom_json, geoid))
                     else:
-                        cursor.execute('INSERT INTO dbo.cbg_geometries (geoid, geometry) VALUES (?, ?)', (geoid, geom_json))
+                        cursor.execute('INSERT INTO dbo.cbg_geometries (geoid, geometry) VALUES (?, ?)', (geom_json, geoid))
                     inserted += 1
                 except Exception as ex:
                     # Record per-row insertion error and continue processing other features
