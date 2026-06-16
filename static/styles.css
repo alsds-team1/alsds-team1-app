@@ -4,7 +4,7 @@
    Design tokens (shared by the homepage hero; the tool below
    keeps its original hard-coded colors untouched)
    ========================================================= */
-: root {
+:root {
   --ink: #0f172a;
   --body: #475569;
   --body-soft: #64748b;
