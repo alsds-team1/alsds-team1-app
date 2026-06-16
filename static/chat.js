@@ -2,18 +2,18 @@ const chatMessages = document.getElementById("chatMessages");
 const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
 
-const state = {
-  step: "category",
-  business_category: null,
-  candidate_lat: null,
-  candidate_lon: null,
-  floor_area: null,
-  last_result: null
-};
+// Canonical conversation history (server-authoritative). Holds user / assistant /
+// tool messages in OpenAI format. The system prompt lives on the server, so it is
+// NOT stored here. After each turn we replace this with what the server returns.
+let conversation = [];
+let selectedLocation = null;
+let busy = false;
 
 addBotMessage(
-  "Welcome. I will guide you through a store-location scenario for Worcester, MA. " +
-  "First, enter the business NAICS code. For example: 4441."
+  "Welcome. I'll help you evaluate a store location in Worcester, MA using a Huff " +
+  "gravity model. Just tell me, in any order: the business (a NAICS code like 4441), " +
+  "where you're considering (click the map or type coordinates such as 42.24, -71.78), " +
+  "and the proposed floor area in square meters."
 );
 
 sendBtn.addEventListener("click", handleSend);
@@ -24,230 +24,79 @@ chatInput.addEventListener("keydown", function (event) {
   }
 });
 
+// Called by map.js when the user clicks the map. We record the location and let the
+// assistant acknowledge it, so the model stays the single source of conversation control.
 window.onMapLocationSelected = function (location) {
-  state.candidate_lat = location.lat;
-  state.candidate_lon = location.lon;
-
-  if (state.step === "location") {
-    addBotMessage(
-      `Great, I captured the candidate location: ${location.lat.toFixed(6)}, ${location.lon.toFixed(6)}. ` +
-      "Now enter the proposed store floor area in square meters."
-    );
-    state.step = "floor_area";
-  }
+  selectedLocation = { lat: location.lat, lon: location.lon };
+  sendUserTurn(
+    `I selected a candidate location on the map: ${location.lat.toFixed(6)}, ${location.lon.toFixed(6)}.`
+  );
 };
 
-async function handleSend() {
+function handleSend() {
   const text = chatInput.value.trim();
-  if (!text) return;
+  if (!text || busy) return;
+  chatInput.value = "";
+  sendUserTurn(text);
+}
+
+async function sendUserTurn(text) {
+  if (busy) return;
+  busy = true;
+  sendBtn.disabled = true;
 
   addUserMessage(text);
-  chatInput.value = "";
+  conversation.push({ role: "user", content: text });
+
+  const typing = addBotMessage("…");
 
   try {
-    /*
-      IMPORTANT:
-      Before treating the message as a normal follow-up question,
-      check whether the user is asking to rerun the model with a new full set of inputs.
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: conversation,
+        selected_location: selectedLocation
+      })
+    });
 
-      Example supported message:
-      "use 42.229212, -71.805525 and rerun the model for NAICS code 4441 and area of 1000 square meters"
-    */
-    const rerunInputs = extractRerunInputs(text);
+    const data = await response.json();
+    removeMessage(typing);
 
-    if (rerunInputs) {
-      await rerunModelFromMessage(rerunInputs);
-      return;
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "The assistant could not respond.");
     }
 
-    if (state.step === "category") {
-      const naicsCode = text.trim();
-
-      if (!/^\d+$/.test(naicsCode)) {
-        addBotMessage("Please enter a numeric NAICS code. For example: 4441.");
-        return;
-      }
-
-      state.business_category = naicsCode;
-      state.step = "location";
-
-      addBotMessage(
-        "Good. Now click the proposed store location on the map. " +
-        "You can also type coordinates as: 42.24, -71.78"
-      );
-      return;
+    // The server returns the authoritative history, including any tool calls/results.
+    if (Array.isArray(data.messages)) {
+      conversation = data.messages;
     }
 
-    if (state.step === "location") {
-      const coords = parseCoordinates(text);
+    addBotMessage(data.reply || "(no reply)");
 
-      if (!coords) {
-        addBotMessage("Please click the map or type coordinates in this format: 42.24, -71.78");
-        return;
+    // If the model ran the Huff tool this turn, render its real output.
+    if (data.huff_result) {
+      const r = data.huff_result;
+      renderResult(r);
+
+      if (window.setCandidateLocation &&
+          typeof r.candidate_lat === "number" &&
+          typeof r.candidate_lon === "number") {
+        window.setCandidateLocation(r.candidate_lat, r.candidate_lon, false);
       }
 
-      state.candidate_lat = coords.lat;
-      state.candidate_lon = coords.lon;
-
-      if (window.setCandidateLocation) {
-        window.setCandidateLocation(coords.lat, coords.lon, false);
+      if (window.plotCompetitors && Array.isArray(r.competitors)) {
+        window.plotCompetitors(r.competitors);
       }
-
-      state.step = "floor_area";
-      addBotMessage("Great. Now enter the proposed store floor area in square meters.");
-      return;
-    }
-
-    if (state.step === "floor_area") {
-      const area = Number(text.replace(/,/g, ""));
-
-      if (!Number.isFinite(area) || area <= 0) {
-        addBotMessage("Please enter a positive numeric floor area, such as 1000.");
-        return;
-      }
-
-      state.floor_area = area;
-      state.step = "ready";
-
-      addBotMessage(
-        `Thanks. I will run the Huff model for NAICS ${state.business_category}, ` +
-        `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
-        `and floor area ${state.floor_area} square meters.`
-      );
-
-      await runModel();
-      return;
-    }
-
-    if (state.step === "ready") {
-      await askQuestion(text);
-      return;
     }
   } catch (error) {
+    removeMessage(typing);
     addErrorMessage(error.message || String(error));
+  } finally {
+    busy = false;
+    sendBtn.disabled = false;
+    chatInput.focus();
   }
-}
-
-async function rerunModelFromMessage(inputs) {
-  state.business_category = inputs.business_category;
-  state.candidate_lat = inputs.candidate_lat;
-  state.candidate_lon = inputs.candidate_lon;
-  state.floor_area = inputs.floor_area;
-  state.step = "ready";
-
-  addBotMessage(
-    `I found a new complete model input set. I will rerun the Huff model for NAICS ${state.business_category}, ` +
-    `location (${state.candidate_lat.toFixed(6)}, ${state.candidate_lon.toFixed(6)}), ` +
-    `and floor area ${state.floor_area} square meters.`
-  );
-
-  if (window.setCandidateLocation) {
-    window.setCandidateLocation(state.candidate_lat, state.candidate_lon, false);
-  }
-
-  await runModel();
-}
-
-async function runModel() {
-  addBotMessage("Running the model now...");
-
-  const response = await fetch("/api/run_huff", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      candidate_lat: state.candidate_lat,
-      candidate_lon: state.candidate_lon,
-      business_category: state.business_category,
-      floor_area: state.floor_area,
-
-      // Optional aliases for clearer backend compatibility
-      naics_code: state.business_category,
-      floor_area_sqm: state.floor_area
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || !data.ok) {
-    throw new Error(data.error || "Model failed.");
-  }
-
-  state.last_result = data.result;
-
-  renderResult(data.result);
-
-  if (window.plotCompetitors) {
-    window.plotCompetitors(data.result.competitors);
-  }
-
-  addBotMessage(
-    data.explanation ||
-    "Model completed. You can now ask follow-up questions about the result, or provide a new NAICS code, area, and coordinates to rerun the model."
-  );
-}
-
-async function askQuestion(question) {
-  if (!state.last_result) {
-    addBotMessage("Please complete a model run first.");
-    return;
-  }
-
-  const response = await fetch("/api/ask", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      question,
-      result: state.last_result
-    })
-  });
-
-  const data = await response.json();
-
-  if (!response.ok || !data.ok) {
-    throw new Error(data.error || "The assistant could not answer.");
-  }
-
-  addBotMessage(data.answer);
-}
-
-function extractRerunInputs(message) {
-  const coords = parseCoordinates(message);
-
-  if (!coords) {
-    return null;
-  }
-
-  const naicsMatch =
-    message.match(/naics(?:\s+code)?\s*(?:is|=|:|of|for)?\s*(\d{2,6})/i) ||
-    message.match(/business\s+category\s*(?:is|=|:|of|for)?\s*(\d{2,6})/i) ||
-    message.match(/category\s*(?:is|=|:|of|for)?\s*(\d{2,6})/i);
-
-  const areaMatch =
-    message.match(/area\s*(?:of|is|=|:)?\s*([\d,]+(?:\.\d+)?)/i) ||
-    message.match(/floor\s+area\s*(?:of|is|=|:)?\s*([\d,]+(?:\.\d+)?)/i) ||
-    message.match(/([\d,]+(?:\.\d+)?)\s*(?:square\s+meters|square\s+metres|sqm|sq\.?\s*m|m2|m²)/i);
-
-  if (!naicsMatch || !areaMatch) {
-    return null;
-  }
-
-  const businessCategory = naicsMatch[1];
-  const floorArea = Number(areaMatch[1].replace(/,/g, ""));
-
-  if (!businessCategory || !Number.isFinite(floorArea) || floorArea <= 0) {
-    return null;
-  }
-
-  return {
-    business_category: businessCategory,
-    candidate_lat: coords.lat,
-    candidate_lon: coords.lon,
-    floor_area: floorArea
-  };
 }
 
 function renderResult(result) {
@@ -297,42 +146,16 @@ function renderResult(result) {
   `;
 }
 
-function parseCoordinates(text) {
-  /*
-    Supports:
-    42.229212, -71.805525
-    use 42.229212, -71.805525 and rerun...
-  */
-  const match = text.match(/(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/);
-
-  if (!match) {
-    return null;
-  }
-
-  const lat = Number(match[1]);
-  const lon = Number(match[2]);
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return null;
-  }
-
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-    return null;
-  }
-
-  return { lat, lon };
-}
-
 function addBotMessage(text) {
-  addMessage(text, "bot");
+  return addMessage(text, "bot");
 }
 
 function addUserMessage(text) {
-  addMessage(text, "user");
+  return addMessage(text, "user");
 }
 
 function addErrorMessage(text) {
-  addMessage(text, "error");
+  return addMessage(text, "error");
 }
 
 function addMessage(text, type) {
@@ -341,6 +164,13 @@ function addMessage(text, type) {
   div.innerText = text;
   chatMessages.appendChild(div);
   chatMessages.scrollTop = chatMessages.scrollHeight;
+  return div;
+}
+
+function removeMessage(el) {
+  if (el && el.parentNode) {
+    el.parentNode.removeChild(el);
+  }
 }
 
 function escapeHtml(value) {
