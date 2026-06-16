@@ -391,17 +391,13 @@ def _get_demand_categories():
 
 def resolve_naics_code(user_input, naics_whitelist, naics_calibrated, client, deployment):
     """
-    Core logic function to classify business descriptions into NAICS codes.
-    
-    Args:
-        user_input (str): The raw business description provided by the user.
-        naics_whitelist (dict): A dictionary of authorized NAICS codes and names.
-        naics_calibrated (set/list): A collection of NAICS codes with pre-calibrated model parameters.
-        client: The AI model client instance (e.g., OpenAI/Azure client).
-        deployment (str): The specific model or deployment identifier.
+    Classify a business description into a NAICS code and tier the result.
 
-    Returns:
-        dict: A structured dictionary containing 'ok' status, and 'data' or 'error' message.
+    The tier (`mark`) is computed in Python -- never trusting the model to self-rate -- and
+    uses the database as the source of truth for whether a prediction is even possible:
+        mark 0 = calibrated AND has demand data -> confident prediction
+        mark 1 = has demand but not calibrated  -> rough prediction (fallback alpha/beta)
+        mark 2 = no usable data (no demand, or code not recognized) -> cannot predict
     """
     if not user_input or not user_input.strip():
         return {"ok": False, "error": "No input provided."}
@@ -409,17 +405,15 @@ def resolve_naics_code(user_input, naics_whitelist, naics_calibrated, client, de
     # Format whitelist into a string for the AI prompt context
     whitelist_text = "\n".join(f"{code}: {name}" for code, name in naics_whitelist.items())
 
-    # Define system instructions for the classification task
+    # The model only needs to return the code and name; Python computes the tier (mark).
     system_prompt = (
         "You are an expert NAICS code classifier. "
         "Analyze the business description and return the best matching NAICS code from the whitelist. "
         "Respond ONLY with a JSON object. Format: "
-        '{"naics_code": "4441", "category_name": "...", "confidence": "high"}'
-        "If no match is reasonable, set confidence to 'low'."
+        '{"naics_code": "4441", "category_name": "..."}'
     )
 
     try:
-        # Request completion from the model
         response = client.chat.completions.create(
             model=deployment,
             messages=[
@@ -430,54 +424,40 @@ def resolve_naics_code(user_input, naics_whitelist, naics_calibrated, client, de
         )
 
         raw_content = response.choices[0].message.content.strip()
-        
+
         # Clean markdown formatting if present in the model output
         if "```" in raw_content:
             raw_content = raw_content.replace("```json", "").replace("```", "").strip()
 
-        # Parse AI response to JSON
         parsed = json.loads(raw_content)
     except Exception as e:
         return {"ok": False, "error": f"Model inference or parsing failed: {str(e)}"}
 
     naics_code = str(parsed.get("naics_code", "")).strip()
-    
-    # Validate result against the authorized whitelist
-    if naics_code not in naics_whitelist:
-        return {"ok": False, "error": "No matching records found for this business type."}
+    category_name = parsed.get("category_name", naics_whitelist.get(naics_code, "Unknown Category"))
 
-    # Determine metadata based on classification results
-    category_name = parsed.get("category_name", naics_whitelist[naics_code])
-    confidence = parsed.get("confidence", "low")
-    is_fallback = naics_code not in naics_calibrated
+    # Tier the result. The whitelist is broader than the dataset, so being recognized is not
+    # enough -- we also confirm the category has demand data before calling it predictable.
+    if naics_code in naics_whitelist:
+        canonical_name = naics_whitelist[naics_code]
+        has_demand = canonical_name.strip().lower() in _get_demand_categories()
+        if naics_code in naics_calibrated and has_demand:
+            mark = 0   # calibrated + has data
+        elif has_demand:
+            mark = 1   # data exists but uncalibrated (rough)
+        else:
+            mark = 2   # recognized but no demand data (e.g. NAICS 4442) -> dead end
+    else:
+        mark = 2       # not in the whitelist at all
 
-    # Verify the category actually has demand data in Worcester. The whitelist is broader
-    # than the dataset (e.g. NAICS 4442 has no rows), so without this check the resolver
-    # would happily return categories that can only ever produce an empty 0/0 prediction.
-    canonical_name = naics_whitelist[naics_code]
-    if canonical_name.strip().lower() not in _get_demand_categories():
-        return {
-            "ok": False,
-            "error": (
-                f"'{canonical_name}' (NAICS {naics_code}) is recognized but has no data in "
-                f"the Worcester dataset, so no prediction can be made for it. Please try a "
-                f"supported category."
-            ),
-        }
-
-    # Construct success response structure
     result = {
         "naics_code": naics_code,
         "category_name": category_name,
-        "is_fallback": is_fallback,
-        "supported": True
+        "mark": mark,
+        "supported": mark != 2,
     }
-    
-    # Flag low confidence matches for manual verification
-    if confidence == "low":
-        result["warning"] = "Low confidence match. Please confirm this category."
-
     return {"ok": True, "data": result}
+
 
 @app.route("/api/trans_naics", methods=["POST"])
 def trans_naics():
