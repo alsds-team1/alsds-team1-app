@@ -1,4 +1,4 @@
-""" 
+"""
 Azure SQL Huff Engine
 
 This version removes the local SQLite dependency and queries Azure SQL through db.py.
@@ -260,7 +260,7 @@ def run_huff_model(
             # Tract in GeoJSON may be like '731204' or '7312' depending on source; normalize to last 4-5 digits
             tract = tract_val
             # If tract looks longer than 4-5, keep as-is; otherwise use it directly
-            cbg_name = f"Tract {tract}, Block Group {blk_str}"
+            cbg_name = f"Tract {tract} · BG {blk_str}"
 
         elif geoid in geoid_to_name and meta.get('name'):
             # Fallback to NAMELSAD10 text
@@ -278,7 +278,7 @@ def run_huff_model(
                 except Exception:
                     block_str = block
 
-                cbg_name = f"Tract {tract}, Block Group {block_str}"
+                cbg_name = f"Tract {tract} · BG {block_str}"
             else:
                 cbg_name = f"CBG {geoid}"
 
