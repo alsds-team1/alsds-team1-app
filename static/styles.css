@@ -274,7 +274,7 @@ th {
   padding: 26px 0 8px;
 }
 .als-brand {
-  font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+  font-family: var(--mono); font-size: 24px; letter-spacing: .14em;
   text-transform: uppercase; color: var(--pull-deep); font-weight: 500;
 }
 .als-brand b { color: var(--ink); font-weight: 500; }
