@@ -1,7 +1,6 @@
-# AI-Assisted Location Decision Support System (ALSDS)
-### ALY6080: Integrated Experiential Learning 
+# Spatial Intelligence Platform (SIP)
 
-### Team 1: Jirapa, Zexuan, and Yixuan
+### Randm: Jirapa, Zexuan, and Yixuan
 
 #### Web direction: https://alsds-team1-app-e3fed9azh2fpb4ej.eastus-01.azurewebsites.net/
 
