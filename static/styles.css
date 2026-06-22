@@ -424,3 +424,70 @@ th {
   .als-idea { grid-template-columns: 1fr; gap: 22px; padding: 32px 0; }
   .als-mini { margin: 0 auto; }
   }
+
+/* =========================================================
+   RESULT SCORECARD (Model Result panel)
+   ========================================================= */
+.scorecard {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.scorecard .card {
+  flex: 1 1 120px;
+  background: #ffffff;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.scorecard .card.headline {
+  border: 1px solid var(--pull);
+  box-shadow: 0 0 0 3px rgba(14, 165, 164, 0.12);
+}
+.card-value {
+  font-family: var(--display);
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.scorecard .card.headline .card-value { color: var(--pull-deep); }
+.card-unit {
+  font-size: .78rem;
+  font-weight: 500;
+  color: var(--body-soft);
+  margin-left: 4px;
+}
+.card-label {
+  font-size: .8rem;
+  color: var(--body);
+  margin-top: 4px;
+}
+.card-tag {
+  display: inline-block;
+  font-size: .6rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #fff;
+  background: var(--pull);
+  border-radius: 999px;
+  padding: 2px 7px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.result-meta {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: .82rem;
+  color: var(--body);
+  margin-bottom: 10px;
+}
+.result-note {
+  font-size: .82rem;
+  color: var(--body-soft);
+  line-height: 1.5;
+  border-top: 1px dashed var(--hairline);
+  padding-top: 10px;
+}
