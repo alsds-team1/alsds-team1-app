@@ -1000,5 +1000,44 @@ def get_cbg_map():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route('/api/top_pois_building_material', methods=['GET'])
+def api_top_pois_building_material():
+    """Temporary API: return top 10 POIs where top_category = 'Building Material and Supplies Dealers'."""
+    try:
+        category = request.args.get('top_category', 'Building Material and Supplies Dealers')
+        limit = int(request.args.get('limit', 10))
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            sql = (
+                "SELECT TOP (?) location_name, top_category, latitude, longitude, wkt_area_sq_meters "
+                "FROM pois "
+                "WHERE top_category = ?"
+            )
+            # Many ODBC drivers accept parameterized TOP via string formatting; to be safe, enforce limit in Python
+            cursor.execute(
+                "SELECT location_name, top_category, latitude, longitude, wkt_area_sq_meters FROM pois WHERE top_category = ? ORDER BY location_name OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY",
+                (category, limit)
+            )
+            rows = cursor.fetchall()
+
+        results = [
+            {
+                'location_name': r[0],
+                'top_category': r[1],
+                'latitude': r[2],
+                'longitude': r[3],
+                'wkt_area_sq_meters': r[4]
+            }
+            for r in rows
+        ]
+
+        return jsonify({'ok': True, 'count': len(results), 'results': results})
+
+    except Exception as e:
+        app.logger.exception('api_top_pois_building_material failed')
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
