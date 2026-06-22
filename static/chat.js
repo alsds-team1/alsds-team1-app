@@ -14,9 +14,9 @@ let busy = false;
 
 addBotMessage(
   "Welcome. I'll help you evaluate a store location in Worcester, MA using a Huff " +
-  "gravity model. Let's go in three steps: first the business type (a NAICS code like " +
-  "4441), then the location as coordinates (for example 42.24, -71.78), and finally the " +
-  "proposed floor area in square meters."
+  "gravity model. Just tell me, in any order: the business (a NAICS code like 4441), " +
+  "where you're considering (click the map or type coordinates such as 42.24, -71.78), " +
+  "and the proposed floor area in square meters."
 );
 
 sendBtn.addEventListener("click", handleSend);
@@ -150,9 +150,9 @@ function renderResult(result) {
       <thead>
         <tr>
           <th>Name</th>
-          <th>Distance</th>
-          <th>Size</th>
-          <th>Attraction</th>
+          <th>Distance (mi)</th>
+          <th>Visits/day</th>
+          <th>Attraction (capture prob.)</th>
         </tr>
       </thead>
       <tbody>
