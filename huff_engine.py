@@ -153,12 +153,20 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
     cbg_data = cbg_data.dropna(subset=["x_26919", "y_26919"]).copy()
     dropped_cbgs = total_cbgs - len(cbg_data)
 
-    cbg_data["new_dist_m"] = (
+    # ==================== UNIT ALIGNMENT FIX ====================
+    # Calculate distance in meters, then immediately convert to miles (1 mile = 1609.344 meters)
+    # Clip lower bound to 0.1 miles to prevent division by zero or infinite utility
+    cbg_data["new_dist_miles"] = (
         ((cbg_data["x_26919"] - new_x) ** 2 + (cbg_data["y_26919"] - new_y) ** 2) ** 0.5
+        / 1609.344
     ).clip(lower=0.1)
 
-    # Core logic correction: Separate probability calculations
-    cbg_data["u_new"] = (float(store_area_sq_m) ** alpha) / (cbg_data["new_dist_m"] ** beta)
+    # Convert the input store area from square meters to square feet (1 sq meter = 10.76391 sq feet)
+    store_area_sq_ft = float(store_area_sq_m) * 10.76391
+
+    # Core logic correction: Separate probability calculations using aligned units
+    cbg_data["u_new"] = (store_area_sq_ft ** alpha) / (cbg_data["new_dist_miles"] ** beta)
+    # ============================================================
     
     # 1. Calculate capture probability and predicted visits for [YOUR NEW STORE]
     # Using .fillna(0) to prevent division by zero if both utilities are 0
@@ -325,9 +333,9 @@ def run_huff_model(
     # Compute a simple scalar representation of the candidate location's
     # attraction: the mean capture probability across all CBGs (p_new).
     # This is provided to the frontend as a single reference value for charts.
-    try:
-        candidate_attraction = float(details["p_new"].mean())
-    except Exception:
+    if total_market_demand > 0:
+        candidate_attraction = total_pred / total_market_demand
+    else:
         candidate_attraction = 0.0
 
     del result["details"]

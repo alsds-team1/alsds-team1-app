@@ -163,7 +163,7 @@ function renderResult(result) {
           <tr>
             <td>${escapeHtml(c.name ?? c.place_name ?? c.poi_name ?? "Unknown")}</td>
             <td>${escapeHtml(c.distance_miles ?? c.distance ?? "N/A")}</td>
-            <td>${escapeHtml(c.size ?? c.floor_area ?? c.area ?? "N/A")}</td>
+            <td>${escapeHtml(c.size ?? c.predicted_visits ?? "N/A")}</td>
             <td>${escapeHtml(c.attraction ?? "N/A")}</td>
           </tr>
         `).join("")}
