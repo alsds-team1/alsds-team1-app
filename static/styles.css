@@ -287,7 +287,7 @@ th {
 
 /* hero — image column is now smaller */
 .als-hero {
-  display: grid; grid-template-columns: 1.3fr 0.7fr; gap: 40px;
+  display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px;
   align-items: center; padding: 28px 0 44px;
 }
 .als-eyebrow {
@@ -328,12 +328,12 @@ th {
 .als-arrow { transition: transform .15s ease; }
 .als-btn-primary:hover .als-arrow { transform: translateY(2px); }
 
-/* signature: gravity field — capped so it stays small */
+/* signature: gravity field — fluid, scales with the column/screen */
 .als-field-card {
   background: var(--surface); border: 1px solid var(--hairline);
   border-radius: 18px; padding: 14px; position: relative;
   box-shadow: 0 24px 50px -36px rgba(15, 33, 56, 0.45);
-  max-width: 320px; margin-left: auto;          /* small, right-aligned */
+  width: 100%; max-width: 520px; margin-left: auto;   /* grows to fill, capped for very wide screens */
 }
 .als-field-card svg { display: block; width: 100%; height: auto; border-radius: 10px; }
 .als-field-tag {
@@ -403,7 +403,7 @@ th {
 .als-step p { margin: 0; color: var(--body); font-size: .95rem; line-height: 1.5; }
 
 /* idea */
-.als-idea { display: grid; grid-template-columns: 1.25fr .75fr; gap: 40px; align-items: center; padding: 44px 0; }
+.als-idea { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center; padding: 44px 0; }
 .als-idea h2 {
   font-family: var(--display); font-weight: 600;
   font-size: clamp(1.6rem, 2.8vw, 2.1rem); line-height: 1.1; letter-spacing: -.02em;
@@ -415,7 +415,7 @@ th {
 .als-mini {
   background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px;
   padding: 14px; box-shadow: 0 24px 50px -42px rgba(15, 33, 56, 0.5);
-  max-width: 300px; margin-left: auto;
+  width: 100%; max-width: 480px; margin-left: auto;
 }
 .als-mini svg { display: block; width: 100%; height: auto; }
 
