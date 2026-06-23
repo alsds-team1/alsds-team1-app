@@ -314,9 +314,11 @@ def run_huff_model(
             "placekey": str(row['top_placekey']),
             "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
             "historical_visits": int(hist_visits),                      # Original competitor foot traffic
-            "predicted_retained_visits": round(est_retained_visits, 2), # Traffic they keep after your store opens
-            "retention_rate": round(p_existing, 4),                     # Their customer retention probability
-            "market_share": round(comp_market_share, 6)                 # Their adjusted market share
+            "predicted_visits": round(est_retained_visits, 2), # Traffic they keep after your store opens
+            "attraction": round(p_existing, 4),                     # Their customer retention probability
+            "market_share": round(comp_market_share, 6),                 # Their adjusted market share
+            "my_store_attraction": round(row["p_new"], 4),
+            "my_store_captured_visits": round(float(row.get('predicted_visits', 0.0)), 2)
         })
 
     # Clean up the large DataFrame to free memory

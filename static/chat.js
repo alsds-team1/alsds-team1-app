@@ -318,7 +318,7 @@ function updateCompetitorsChart(competitors, candidateAttraction) {
       // Draw label on the right side
       ctx2.fillStyle = 'rgba(220,38,38,0.95)';
       ctx2.font = '12px Arial';
-      const label = `Candidate mean: ${meanAttraction.toFixed(4)}`;
+      const label = `Your Attraction Score: ${meanAttraction.toFixed(4)}`;
       const textWidth = ctx2.measureText(label).width;
       const px = chart.chartArea.right - textWidth - 6;
       const py = yPixel - 6;
