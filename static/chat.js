@@ -179,36 +179,38 @@ function renderMarketSharePie(result) {
   const pieCanvas = document.getElementById('marketSharePie');
   if (!pieCanvas) return;
 
-  // We expect `result.predicted_visits` (candidate) and result.competitors[] with market_share
-  const candidateShare = Number(result.market_share) || 0;
+  // Share of daily visits among your store (predicted) and the nearby competitors.
+  // This is the split AMONG these players — not your share of all Worcester demand
+  // (that true figure, ~0.45%, stays in the scorecard). No "Other" catch-all slice.
   const competitors = Array.isArray(result.competitors) ? result.competitors : [];
+  const candidateVisits = Number(result.predicted_visits) || 0;
 
-  // Build labels and values: candidate first, then top competitors
-  const labels = ['Candidate'];
-  const values = [candidateShare];
-
-  // We'll show up to 9 competitors to keep the pie readable
-  const maxCompetitors = 9;
-  const topComps = competitors.slice(0, maxCompetitors);
-  topComps.forEach((c, i) => {
-    const name = c.name ?? c.place_name ?? `Comp ${i+1}`;
-    labels.push(name);
-    // market_share may be absolute fraction; ensure numeric
-    values.push(Number(c.market_share) || 0);
+  const labels = ['Your store'];
+  const values = [candidateVisits];
+  competitors.slice(0, 10).forEach(c => {
+    const v = Number(c.visits_per_day) || 0;
+    if (v > 0) {
+      labels.push(c.name ?? 'Competitor');
+      values.push(v);
+    }
   });
 
-  // If total < 1 due to truncation, add an "Other" slice for the remainder
-  const total = values.reduce((a,b) => a + b, 0);
-  if (total < 1.0) {
-    const rem = Math.max(0, 1.0 - total);
-    // Only add Other if it's meaningful (>0)
-    if (rem > 1e-6) {
-      labels.push('Other');
-      values.push(rem);
-    }
-  }
+  const total = values.reduce((a, b) => a + b, 0) || 1;
 
-  // Destroy previous pie chart if any
+  const palette = [
+    'rgba(14, 165, 164, 0.9)',   // Your store — teal highlight
+    'rgba(99, 102, 241, 0.7)',
+    'rgba(236, 72, 153, 0.7)',
+    'rgba(34, 197, 94, 0.7)',
+    'rgba(249, 115, 22, 0.7)',
+    'rgba(59, 130, 246, 0.7)',
+    'rgba(168, 85, 247, 0.7)',
+    'rgba(20, 184, 166, 0.7)',
+    'rgba(245, 158, 11, 0.7)',
+    'rgba(100, 116, 139, 0.7)',
+    'rgba(190, 24, 93, 0.6)'
+  ];
+
   if (marketShareChart) {
     try { marketShareChart.destroy(); } catch (e) {}
     marketShareChart = null;
@@ -220,31 +222,21 @@ function renderMarketSharePie(result) {
     data: {
       labels: labels,
       datasets: [{
-        data: values.map(v => Number(v)),
-        backgroundColor: [
-          'rgba(6, 182, 212, 0.85)',
-          'rgba(14, 165, 164, 0.75)',
-          'rgba(99, 102, 241, 0.65)',
-          'rgba(236, 72, 153, 0.65)',
-          'rgba(34,197,94,0.65)',
-          'rgba(249,115,22,0.65)',
-          'rgba(59,130,246,0.65)',
-          'rgba(168,85,247,0.65)',
-          'rgba(20,184,166,0.65)',
-          'rgba(148,163,184,0.45)'
-        ].slice(0, labels.length),
+        data: values,
+        backgroundColor: labels.map((_, i) => palette[i % palette.length]),
         borderColor: 'rgba(255,255,255,0.9)',
         borderWidth: 1
       }]
     },
     options: {
       plugins: {
-        legend: { position: 'right', labels: { boxWidth:12, padding:6 } },
+        legend: { position: 'right', labels: { boxWidth: 12, padding: 6 } },
         tooltip: {
           callbacks: {
             label: (ctx) => {
               const v = Number(ctx.raw) || 0;
-              return `${ctx.label}: ${(v * 100).toFixed(2)}%`;
+              const pct = (v / total) * 100;
+              return `${ctx.label}: ${pct.toFixed(1)}% (${v.toFixed(1)} visits/day)`;
             }
           }
         }
