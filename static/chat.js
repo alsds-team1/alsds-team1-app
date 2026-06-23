@@ -6,6 +6,8 @@ const sendBtn = document.getElementById("sendBtn");
 let competitorsChart = null;
 // Separate Chart instance for the market-share pie
 let marketShareChart = null;
+// Your store's predicted visits/day, drawn as a reference line on the bar chart.
+let candidateRefVisits = 0;
 
 // Canonical conversation history (server-authoritative). Holds user / assistant /
 // tool messages in OpenAI format. The system prompt lives on the server, so it is
@@ -83,7 +85,7 @@ async function sendUserTurn(text) {
     if (data.huff_result) {
       const r = data.huff_result;
         renderResult(r);
-        updateCompetitorsChart(r.competitors, r.candidate_attraction);
+        updateCompetitorsChart(r.competitors, r.predicted_visits);
         renderMarketSharePie(r);
 
       if (window.setCandidateLocation &&
@@ -141,10 +143,10 @@ function renderResult(result) {
     ${notes ? `<div class="result-note">${escapeHtml(notes)}</div>` : ""}
   `;
 
-  const competitors = Array.isArray(result.competitors) ? result.competitors : [];
+  const stores = Array.isArray(result.competitors) ? result.competitors : [];
 
-  if (competitors.length === 0) {
-    tableWrap.innerHTML = "No competitor records returned.";
+  if (stores.length === 0) {
+    tableWrap.innerHTML = "No competitor businesses found for this category.";
     return;
   }
 
@@ -152,63 +154,41 @@ function renderResult(result) {
     <table>
       <thead>
         <tr>
-          <th>Name</th>
+          <th>Store</th>
           <th>Distance (mi)</th>
+          <th>Size (m²)</th>
           <th>Visits/day</th>
-          <th>Attraction (capture prob.)</th>
+          <th>Huff pull (rel.)</th>
         </tr>
       </thead>
       <tbody>
-        ${competitors.map(c => `
+        ${stores.map(c => `
           <tr>
-            <td>${escapeHtml(c.name ?? c.place_name ?? c.poi_name ?? "Unknown")}</td>
-            <td>${escapeHtml(c.distance_miles ?? c.distance ?? "N/A")}</td>
-            <td>${escapeHtml(c.size ?? c.predicted_visits ?? "N/A")}</td>
-            <td>${escapeHtml(c.attraction ?? "N/A")}</td>
+            <td>${escapeHtml(c.name ?? "Unknown")}</td>
+            <td>${escapeHtml(c.distance_miles ?? "N/A")}</td>
+            <td>${escapeHtml(c.size ?? "N/A")}</td>
+            <td>${escapeHtml(c.visits_per_day ?? "N/A")}</td>
+            <td>${escapeHtml(c.huff_pull ?? c.attraction ?? "N/A")}</td>
           </tr>
         `).join("")}
       </tbody>
     </table>
   `;
-
-  // Also render the market-share pie chart comparing the candidate vs the top competitors
-  renderMarketSharePie(result);
 }
 
 function renderMarketSharePie(result) {
   const pieCanvas = document.getElementById('marketSharePie');
   if (!pieCanvas) return;
 
-  // We expect `result.predicted_visits` (candidate) and result.competitors[] with market_share
-  const candidateShare = Number(result.market_share) || 0;
-  const competitors = Array.isArray(result.competitors) ? result.competitors : [];
+  // The only coherent slice from the model: your store's share of total category
+  // demand vs. everything the existing competitors keep. Built from market_share,
+  // so it always agrees with the scorecard.
+  const candidateShare = Math.max(0, Math.min(1, Number(result.market_share) || 0));
+  const competitorShare = Math.max(0, 1 - candidateShare);
 
-  // Build labels and values: candidate first, then top competitors
-  const labels = ['Candidate'];
-  const values = [candidateShare];
+  const labels = ['Your store', 'Existing competitors'];
+  const values = [candidateShare, competitorShare];
 
-  // We'll show up to 9 competitors to keep the pie readable
-  const maxCompetitors = 9;
-  const topComps = competitors.slice(0, maxCompetitors);
-  topComps.forEach((c, i) => {
-    const name = c.name ?? c.place_name ?? `Comp ${i+1}`;
-    labels.push(name);
-    // market_share may be absolute fraction; ensure numeric
-    values.push(Number(c.market_share) || 0);
-  });
-
-  // If total < 1 due to truncation, add an "Other" slice for the remainder
-  const total = values.reduce((a,b) => a + b, 0);
-  if (total < 1.0) {
-    const rem = Math.max(0, 1.0 - total);
-    // Only add Other if it's meaningful (>0)
-    if (rem > 1e-6) {
-      labels.push('Other');
-      values.push(rem);
-    }
-  }
-
-  // Destroy previous pie chart if any
   if (marketShareChart) {
     try { marketShareChart.destroy(); } catch (e) {}
     marketShareChart = null;
@@ -220,42 +200,29 @@ function renderMarketSharePie(result) {
     data: {
       labels: labels,
       datasets: [{
-        data: values.map(v => Number(v)),
-        backgroundColor: [
-          'rgba(6, 182, 212, 0.85)',
-          'rgba(14, 165, 164, 0.75)',
-          'rgba(99, 102, 241, 0.65)',
-          'rgba(236, 72, 153, 0.65)',
-          'rgba(34,197,94,0.65)',
-          'rgba(249,115,22,0.65)',
-          'rgba(59,130,246,0.65)',
-          'rgba(168,85,247,0.65)',
-          'rgba(20,184,166,0.65)',
-          'rgba(148,163,184,0.45)'
-        ].slice(0, labels.length),
+        data: values,
+        backgroundColor: ['rgba(14, 165, 164, 0.85)', 'rgba(148, 163, 184, 0.40)'],
         borderColor: 'rgba(255,255,255,0.9)',
-        borderWidth: 1
+        borderWidth: 2
       }]
     },
     options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 600, easing: 'easeOutQuart' },
       plugins: {
-        legend: { position: 'right', labels: { boxWidth:12, padding:6 } },
+        legend: { position: 'right', labels: { boxWidth: 12, padding: 8 } },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const v = Number(ctx.raw) || 0;
-              return `${ctx.label}: ${(v * 100).toFixed(2)}%`;
-            }
+            label: (ctx) => `${ctx.label}: ${(Number(ctx.raw) * 100).toFixed(2)}%`
           }
         }
-      },
-      responsive: true,
-      maintainAspectRatio: false
+      }
     }
   });
 }
 
-function updateCompetitorsChart(competitors, candidateAttraction) {
+function updateCompetitorsChart(competitors, candidatePredVisits) {
   const section = document.getElementById("chartSection");
   if (!section) return;
 
@@ -271,16 +238,21 @@ function updateCompetitorsChart(competitors, candidateAttraction) {
 
   section.classList.remove("hidden");
 
-  // Sort by attraction descending and take the top 10.
+  // Busiest competitor stores among the nearby set (by real historical visits/day).
   const top10 = [...competitors]
-    .sort((a, b) => (Number(b.attraction) || 0) - (Number(a.attraction) || 0))
+    .sort((a, b) => (Number(b.visits_per_day) || 0) - (Number(a.visits_per_day) || 0))
     .slice(0, 10);
 
-  const labels = top10.map(c => c.name ?? c.poi_name ?? "Unknown");
-  const data = top10.map(c => Number(c.attraction) || 0);
+  const labels = top10.map(c => c.name ?? "Unknown");
+  const data = top10.map(c => Number(c.visits_per_day) || 0);
 
-  // If the chart already exists, update its data in place so the bars animate
-  // smoothly to the new values (instead of being destroyed and rebuilt).
+  // Reference line = your store's predicted visits/day. Stored at module scope so
+  // the plugin redraws it correctly on in-place (animated) updates too.
+  candidateRefVisits = (typeof candidatePredVisits === 'number' && !isNaN(candidatePredVisits))
+    ? Number(candidatePredVisits)
+    : 0;
+
+  // Update in place so bars animate smoothly when the numbers change.
   if (competitorsChart) {
     competitorsChart.data.labels = labels;
     competitorsChart.data.datasets[0].data = data;
@@ -290,40 +262,30 @@ function updateCompetitorsChart(competitors, candidateAttraction) {
 
   const ctx = document.getElementById("topCompetitorsChart").getContext("2d");
 
-  // Use the backend-provided candidateAttraction if available; otherwise fall back to the
-  // mean of current competitor attraction values.
-  const meanAttraction = (typeof candidateAttraction === 'number' && !isNaN(candidateAttraction))
-    ? Number(candidateAttraction)
-    : (data.reduce((a,b) => a + (Number(b)||0), 0) / Math.max(1, data.length));
-
-  // A small plugin to draw a horizontal line at y = meanAttraction.
-  const drawMeanLinePlugin = {
-    id: 'drawMeanLine',
+  // Draws a dashed line at your store's predicted visits/day, for comparison.
+  const drawCandidateLinePlugin = {
+    id: 'drawCandidateLine',
     afterDatasetsDraw: (chart) => {
       const yScale = chart.scales['y'];
       if (!yScale) return;
-      const yValue = meanAttraction;
-      const yPixel = yScale.getPixelForValue(yValue);
+      const yPixel = yScale.getPixelForValue(candidateRefVisits);
 
-      const ctx2 = chart.ctx;
-      ctx2.save();
-      ctx2.beginPath();
-      ctx2.moveTo(chart.chartArea.left, yPixel);
-      ctx2.lineTo(chart.chartArea.right, yPixel);
-      ctx2.lineWidth = 2;
-      ctx2.strokeStyle = 'rgba(220, 138, 38, 0.85)'; // reddish
-      ctx2.setLineDash([6, 4]);
-      ctx2.stroke();
+      const c2 = chart.ctx;
+      c2.save();
+      c2.beginPath();
+      c2.moveTo(chart.chartArea.left, yPixel);
+      c2.lineTo(chart.chartArea.right, yPixel);
+      c2.lineWidth = 2;
+      c2.strokeStyle = 'rgba(245, 158, 11, 0.95)';
+      c2.setLineDash([6, 4]);
+      c2.stroke();
 
-      // Draw label on the right side
-      ctx2.fillStyle = 'rgba(220,38,38,0.95)';
-      ctx2.font = '12px Arial';
-      const label = `Your Attraction Score: ${meanAttraction.toFixed(4)}`;
-      const textWidth = ctx2.measureText(label).width;
-      const px = chart.chartArea.right - textWidth - 6;
-      const py = yPixel - 6;
-      ctx2.fillText(label, px, py);
-      ctx2.restore();
+      c2.fillStyle = 'rgba(180, 83, 9, 0.95)';
+      c2.font = '12px Arial';
+      const label = `Your store (predicted): ${candidateRefVisits.toFixed(1)}/day`;
+      const tw = c2.measureText(label).width;
+      c2.fillText(label, chart.chartArea.right - tw - 6, yPixel - 6);
+      c2.restore();
     }
   };
 
@@ -332,7 +294,7 @@ function updateCompetitorsChart(competitors, candidateAttraction) {
     data: {
       labels: labels,
       datasets: [{
-        label: "Attraction Score",
+        label: "Visits/day",
         data: data,
         backgroundColor: "rgba(14, 165, 164, 0.55)",
         hoverBackgroundColor: "rgba(14, 165, 164, 0.85)",
@@ -352,14 +314,14 @@ function updateCompetitorsChart(competitors, candidateAttraction) {
           backgroundColor: "rgba(15, 33, 56, 0.92)",
           padding: 10,
           callbacks: {
-            label: (item) => `Attraction: ${Number(item.parsed.y).toFixed(4)}`
+            label: (item) => `Visits/day: ${Number(item.parsed.y).toFixed(1)}`
           }
         }
       },
       scales: {
         y: {
           beginAtZero: true,
-          title: { display: true, text: "Attraction Score" },
+          title: { display: true, text: "Visits/day" },
           grid: { color: "rgba(15, 23, 42, 0.06)" }
         },
         x: {
@@ -367,9 +329,8 @@ function updateCompetitorsChart(competitors, candidateAttraction) {
           ticks: { maxRotation: 45, minRotation: 30, autoSkip: false, font: { size: 10 } }
         }
       }
-    }
-    ,
-    plugins: [drawMeanLinePlugin]
+    },
+    plugins: [drawCandidateLinePlugin]
   });
 }
 
