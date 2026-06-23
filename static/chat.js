@@ -1,7 +1,7 @@
 const chatMessages = document.getElementById("chatMessages");
 const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
-
+ 
 // Declared at top level so we can destroy the old chart instance before redrawing.
 let competitorsChart = null;
 // Separate Chart instance for the market-share pie
