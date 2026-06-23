@@ -323,12 +323,6 @@ def run_huff_model(
 
     # Clean up the large DataFrame to free memory
     # Compute a simple scalar representation of the candidate location's
-    # attraction: the mean capture probability across all CBGs (p_new).
-    # This is provided to the frontend as a single reference value for charts.
-    if total_market_demand > 0:
-        candidate_attraction = total_pred / total_market_demand
-    else:
-        candidate_attraction = 0.0
 
     del result["details"]
 
@@ -346,8 +340,7 @@ def run_huff_model(
         "runtime_ms": round(result["runtime_seconds"] * 1000, 2),
         "notes": _build_notes(result),    # Assuming this function is defined elsewhere
         "competitors": competitors_list,  # Accurate list of rival stores
-        "top_cbgs": top_cbgs_list,        # Accurate list of customer source neighborhoods
-        "candidate_attraction": round(candidate_attraction, 6),
+        "top_cbgs": top_cbgs_list        # Accurate list of customer source neighborhoods
     }
 
 if __name__ == "__main__":
