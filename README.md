@@ -5,6 +5,135 @@
 #### Web direction: https://alsds-team1-app-e3fed9azh2fpb4ej.eastus-01.azurewebsites.net/
 
 ---
+# Changelog
+
+All notable changes to the Spatial Intelligence Platform (SIP) are documented here.
+Newest releases first. These entries sit above the existing `v2.0.1 — Azure SQL Backend`.
+
+---
+
+## v2.6.0 — Responsive Layout
+
+### Changed
+- Widened the page container (`.als-wrap`) from `1120px` to `1440px` and centered the
+  tool area at the same width, so the homepage and tool fill large monitors instead of
+  sitting in a narrow column with empty side margins.
+- Mobile/tablet breakpoints (`900px`, `860px`) left intact — phones and narrow windows
+  still stack correctly.
+
+---
+
+## v2.5.1 — Chatbot Behavior & Chart Fixes
+
+### Fixed
+- **Chart crash** — removed a reference to an undefined `drawMeanLinePlugin` that threw
+  `drawMeanLinePlugin is not defined` and blanked the bar chart. Replaced with a properly
+  defined candidate reference-line plugin (`drawCandidateLinePlugin`).
+- **Pie chart** — no longer mixes incompatible scales or shows duplicated competitors.
+- Removed a duplicate market-share-pie render call.
+
+### Changed
+- **Guided chatbot** — no longer asks the user to re-confirm inputs it already has
+  ("Should I proceed?" / "use the same details?"). When only the location changes, it
+  now re-runs immediately using the known category and floor area, and only asks when a
+  required input is genuinely missing.
+
+---
+
+## v2.5.0 — Real Competitor Intelligence
+
+### Added
+- **Real competitor stores** — competitors now come from the `pois` table (deduped per
+  store via `placekey`), each with real coordinates, store size (m²), total historical
+  visits/day, and a relative Huff pull (`size^α / dist^β`, normalized so the strongest = 1.0).
+- **Competitor bar chart** — plots nearby stores by real visits/day, with a dashed
+  "your store (predicted)" reference line for comparison.
+- **Visit-share pie** — share of daily visits among your store and the nearby competitors
+  (kept distinct from the true Worcester market share, which stays in the scorecard).
+- **Map markers** — real competitor stores are now plotted on the map (they finally carry
+  lat/lon, which the marker code always expected).
+
+### Changed
+- Competitor selection switched from "nearest 12 overall" to **within a 3-mile radius** of
+  the candidate pin (`COMPETITOR_RADIUS_MILES = 3.0`), so the list genuinely changes as the
+  location moves — and correctly shows none in areas with no nearby competitors.
+- Clarified headings so labels match the data: bar chart = "Top competitors by visits/day",
+  neighborhood chart = "capture probability", results table = "Nearby competitor stores".
+
+---
+
+## v2.4.0 — Results Scorecard & Charts
+
+### Added
+- **Model Result scorecard** — Predicted visits (highlighted headline / "key result"),
+  Market share, and Worcester demand, each with units (`visits/day`, `%`, `m²`).
+- **Animated charts** — the competitor bar chart updates in place on re-run instead of
+  being destroyed and rebuilt, so bars animate to new values.
+- **Units on table headers** — Distance (mi), Size (m²), Visits/day.
+
+### Changed
+- Result figures are framed as rounded estimates rather than exact counts.
+
+---
+
+## v2.3.0 — Brand & Homepage Redesign
+
+### Changed
+- Renamed the product from **"ALSDS — Location Decision Support"** to
+  **"Spatial Intelligence Platform (SIP)"** across the brand line, intro copy, and page
+  title; enlarged the brand to a 26px display-font title.
+- Reworded the "How it works" steps to the real flow:
+  choose the business type → enter coordinates + floor area → read the trade area.
+- Redesigned the homepage hero (gravity / cartographic theme, teal–blue–amber palette,
+  animated "pull-field" graphic).
+
+### Removed
+- The "Ready to test a location?" closing bar and its now-unused styles.
+
+---
+
+## v2.2.0 — Model Transparency & Honest Calibration
+
+### Added
+- **`notes` field** on every engine result — calibration state, straight-line-distance
+  caveat, and any dropped neighborhoods.
+- **`no_demand_data` flag** and **`total_demand`** — categories with no demand are reported
+  as a data gap, not as a bad location (prevents misreading 0 visits / 0 share).
+- **Expanded NAICS resolver** — 213-entry fallback mapping granular codes to canonical
+  categories, with three tiers: 0 = calibrated, 1 = rough (uncalibrated but has demand),
+  2 = unsupported.
+
+### Changed
+- Engine drops CBGs with missing centroid coordinates so they don't distort market share.
+- The assistant now opens every result with a one-line confidence label
+  (**Calibrated** / **Rough estimate** / **No data**) and flags a "modest fit" when the
+  calibration correlation is below ~0.4.
+- Shortened neighborhood labels to `Tract X · BG Y`.
+
+### Fixed
+- Granular NAICS codes that map to a calibrated category are now correctly tiered as
+  calibrated (detection is by category **name**, not by the exact code).
+
+---
+
+## v2.1.0 — AI Controller Chatbot
+
+### Changed
+- Replaced the fixed JavaScript state-machine chatbot with an **"AI as controller"**
+  design. A stateless `/api/chat` endpoint runs an Azure OpenAI tool-calling loop; the
+  model collects the inputs in any order and calls the real Huff engine as a tool
+  (`run_huff_model`).
+- `static/chat.js` reduced to a thin client that posts the conversation to `/api/chat`
+  and renders the returned result.
+
+### Added
+- Core guardrail — the assistant never invents numeric results. Predicted visits, market
+  share, and distances come **only** from the engine tool output.
+
+---
+
+
+---
 
 ## v2.0.1 — Azure SQL Backend
 
