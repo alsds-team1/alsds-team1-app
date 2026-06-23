@@ -108,6 +108,10 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
         new_x, new_y = transformer.transform(float(lon), float(lat))
 
         # Azure SQL / pyodbc uses ? placeholders. This is parameterized and safe.
+        # Also join the POI table to get a representative POI name for each CBG.
+        # We pick the single POI with the largest historical visit_count for that CBG
+        # (if any) restricted to the matched top_category. This provides a
+        # human-friendly `location_name` for display instead of the raw CBG name.
         cbg_data = pd.read_sql(
             """
             SELECT
@@ -117,15 +121,29 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
                 c.x_26919,
                 c.y_26919,
                 COALESCE(s.total_u_existing,      0) AS total_u_existing,
-                COALESCE(d.total_category_visits, 0) AS total_category_visits
+                COALESCE(d.total_category_visits, 0) AS total_category_visits,
+                tp.location_name AS top_location_name,
+                tp.placekey AS top_placekey,
+                tp.visit_count AS top_poi_visit_count
             FROM cbg_master AS c
             LEFT JOIN Competitor_Summary AS s
                 ON c.geoid = s.geoid AND s.top_category = ?
             LEFT JOIN category_demand AS d
                 ON c.geoid = d.geoid AND d.top_category = ?
+            LEFT JOIN (
+                -- Choose the single POI in each CBG with the most historical visits
+                SELECT geoid, location_name, placekey, visit_count FROM (
+                    SELECT v.geoid, v.placekey, v.visit_count, p.location_name,
+                        ROW_NUMBER() OVER (PARTITION BY v.geoid ORDER BY v.visit_count DESC) AS rn
+                    FROM cbg_poi_visits v
+                    JOIN pois p ON v.placekey = p.placekey
+                    WHERE p.top_category = ?
+                ) t WHERE rn = 1
+            ) AS tp
+                ON c.geoid = tp.geoid
             """,
             conn,
-            params=[matched_category, matched_category],
+            params=[matched_category, matched_category, matched_category],
         )
 
     # CBGs without a projected centroid can't be scored. Dropping them keeps NaN
@@ -231,8 +249,19 @@ def run_huff_model(
     result = predict_site(candidate_lat, candidate_lon, business_category, floor_area)
     details = result["details"]
 
+    # Include joined POI columns so we can display a human-friendly location_name
     top_cbg_rows = details[
-        ["geoid", "total_category_visits", "total_u_existing", "new_dist_m", "p_new", "predicted_visits"]
+        [
+            "geoid",
+            "total_category_visits",
+            "total_u_existing",
+            "new_dist_m",
+            "p_new",
+            "predicted_visits",
+            "top_location_name",
+            "top_placekey",
+            "top_poi_visit_count",
+        ]
     ].head(10)
 
     # Convert to frontend-expected format for the competitors table
@@ -242,54 +271,28 @@ def run_huff_model(
     competitors_sample = []
     for idx, row in top_cbg_rows.iterrows():
         geoid = str(row['geoid'])
+        # Prefer a POI location_name from the joined top-POI per CBG (if available).
+        # Otherwise fall back to the GeoJSON-derived CBG name as before.
+        location_name = None
+        if 'top_location_name' in row and row['top_location_name'] and not pd.isna(row['top_location_name']):
+            location_name = str(row['top_location_name'])
 
-        cbg_name = None
-        meta = geoid_to_name.get(geoid, {})
-
-        # Prefer explicit tract and blk from GeoJSON if available
-        tract_val = meta.get('tract')
-        blk_val = meta.get('blk')
-        if tract_val and blk_val:
-            # Ensure block group is two digits with leading zero if needed
-            try:
-                blk_int = int(blk_val)
-                blk_str = f"{blk_int:02d}"
-            except Exception:
-                blk_str = str(blk_val).zfill(2)
-
-            # Tract in GeoJSON may be like '731204' or '7312' depending on source; normalize to last 4-5 digits
-            tract = tract_val
-            # If tract looks longer than 4-5, keep as-is; otherwise use it directly
-            cbg_name = f"Tract {tract} · BG {blk_str}"
-
-        elif geoid in geoid_to_name and meta.get('name'):
-            # Fallback to NAMELSAD10 text
-            cbg_name = meta.get('name')
-
-        else:
-            # Final fallback: parse from geoid string
-            if len(geoid) >= 12:
-                tract = geoid[5:10]
-                block = geoid[10:12]
-                # Zero-pad block group to 2 digits
-                try:
-                    block_int = int(block)
-                    block_str = f"{block_int:02d}"
-                except Exception:
-                    block_str = block
-
-                cbg_name = f"Tract {tract} · BG {block_str}"
-            else:
-                cbg_name = f"CBG {geoid}"
+        pred_vis = float(row.get('predicted_visits', 0.0))
+        # Compute competitor market share as the share of total predicted visits
+        total_pred = float(result.get("total_predicted_visits", 0.0))
+        comp_market_share = (pred_vis / total_pred) if total_pred else 0.0
 
         competitors_sample.append({
-            "name": cbg_name,
+            "name": location_name,
             "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
             "size": int(row["total_category_visits"]),
             "attraction": round(row["p_new"], 4),
             # Also keep raw data for backend use
             "geoid": row["geoid"],
-            "predicted_visits": round(row["predicted_visits"], 2),
+            "predicted_visits": round(pred_vis, 2),
+            "market_share": round(comp_market_share, 6),
+            "top_placekey": row.get('top_placekey'),
+            "top_poi_visit_count": int(row['top_poi_visit_count']) if 'top_poi_visit_count' in row and not pd.isna(row['top_poi_visit_count']) else None,
         })
 
     return {

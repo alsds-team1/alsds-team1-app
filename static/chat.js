@@ -4,6 +4,8 @@ const sendBtn = document.getElementById("sendBtn");
 
 // Declared at top level so we can destroy the old chart instance before redrawing.
 let competitorsChart = null;
+// Separate Chart instance for the market-share pie
+let marketShareChart = null;
 
 // Canonical conversation history (server-authoritative). Holds user / assistant /
 // tool messages in OpenAI format. The system prompt lives on the server, so it is
@@ -82,6 +84,7 @@ async function sendUserTurn(text) {
       const r = data.huff_result;
       renderResult(r);
       updateCompetitorsChart(r.competitors);
+      renderMarketSharePie(r);
 
       if (window.setCandidateLocation &&
           typeof r.candidate_lat === "number" &&
@@ -167,6 +170,89 @@ function renderResult(result) {
       </tbody>
     </table>
   `;
+
+  // Also render the market-share pie chart comparing the candidate vs the top competitors
+  renderMarketSharePie(result);
+}
+
+function renderMarketSharePie(result) {
+  const pieCanvas = document.getElementById('marketSharePie');
+  if (!pieCanvas) return;
+
+  // We expect `result.predicted_visits` (candidate) and result.competitors[] with market_share
+  const candidateShare = Number(result.market_share) || 0;
+  const competitors = Array.isArray(result.competitors) ? result.competitors : [];
+
+  // Build labels and values: candidate first, then top competitors
+  const labels = ['Candidate'];
+  const values = [candidateShare];
+
+  // We'll show up to 9 competitors to keep the pie readable
+  const maxCompetitors = 9;
+  const topComps = competitors.slice(0, maxCompetitors);
+  topComps.forEach((c, i) => {
+    const name = c.name ?? c.place_name ?? `Comp ${i+1}`;
+    labels.push(name);
+    // market_share may be absolute fraction; ensure numeric
+    values.push(Number(c.market_share) || 0);
+  });
+
+  // If total < 1 due to truncation, add an "Other" slice for the remainder
+  const total = values.reduce((a,b) => a + b, 0);
+  if (total < 1.0) {
+    const rem = Math.max(0, 1.0 - total);
+    // Only add Other if it's meaningful (>0)
+    if (rem > 1e-6) {
+      labels.push('Other');
+      values.push(rem);
+    }
+  }
+
+  // Destroy previous pie chart if any
+  if (marketShareChart) {
+    try { marketShareChart.destroy(); } catch (e) {}
+    marketShareChart = null;
+  }
+
+  const ctx = pieCanvas.getContext('2d');
+  marketShareChart = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: values.map(v => Number(v)),
+        backgroundColor: [
+          'rgba(6, 182, 212, 0.85)',
+          'rgba(14, 165, 164, 0.75)',
+          'rgba(99, 102, 241, 0.65)',
+          'rgba(236, 72, 153, 0.65)',
+          'rgba(34,197,94,0.65)',
+          'rgba(249,115,22,0.65)',
+          'rgba(59,130,246,0.65)',
+          'rgba(168,85,247,0.65)',
+          'rgba(20,184,166,0.65)',
+          'rgba(148,163,184,0.45)'
+        ].slice(0, labels.length),
+        borderColor: 'rgba(255,255,255,0.9)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      plugins: {
+        legend: { position: 'right', labels: { boxWidth:12, padding:6 } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const v = Number(ctx.raw) || 0;
+              return `${ctx.label}: ${(v * 100).toFixed(2)}%`;
+            }
+          }
+        }
+      },
+      responsive: true,
+      maintainAspectRatio: false
+    }
+  });
 }
 
 function updateCompetitorsChart(competitors) {
