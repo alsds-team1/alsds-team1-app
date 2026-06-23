@@ -153,21 +153,13 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
     cbg_data = cbg_data.dropna(subset=["x_26919", "y_26919"]).copy()
     dropped_cbgs = total_cbgs - len(cbg_data)
 
-    # ==================== UNIT ALIGNMENT FIX ====================
-    # Calculate distance in meters, then immediately convert to miles (1 mile = 1609.344 meters)
-    # Clip lower bound to 0.1 miles to prevent division by zero or infinite utility
-    cbg_data["new_dist_miles"] = (
+
+    cbg_data["new_dist_m"] = (
         ((cbg_data["x_26919"] - new_x) ** 2 + (cbg_data["y_26919"] - new_y) ** 2) ** 0.5
-        / 1609.344
     ).clip(lower=0.1)
 
-    # Convert the input store area from square meters to square feet (1 sq meter = 10.76391 sq feet)
-    store_area_sq_ft = float(store_area_sq_m) * 10.76391
+    cbg_data["u_new"] = (float(store_area_sq_m) ** alpha) / (cbg_data["new_dist_m"] ** beta)
 
-    # Core logic correction: Separate probability calculations using aligned units
-    cbg_data["u_new"] = (store_area_sq_ft ** alpha) / (cbg_data["new_dist_miles"] ** beta)
-    # ============================================================
-    
     # 1. Calculate capture probability and predicted visits for [YOUR NEW STORE]
     # Using .fillna(0) to prevent division by zero if both utilities are 0
     cbg_data["p_new"] = (cbg_data["u_new"] / (cbg_data["u_new"] + cbg_data["total_u_existing"])).fillna(0)
@@ -292,7 +284,7 @@ def run_huff_model(
         top_cbgs_list.append({
             "geoid": geoid_str,
             "name": cbg_name,
-            "distance_miles": round(row["new_dist_miles"], 2),
+            "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
             "demand_size": int(row["total_category_visits"]),
             "capture_probability": round(row["p_new"], 4), # Your store's capture probability for this area
             "predicted_visits": round(pred_vis, 2),
@@ -320,7 +312,7 @@ def run_huff_model(
         competitors_list.append({
             "name": str(row['top_location_name']),
             "placekey": str(row['top_placekey']),
-            "distance_miles": round(row["new_dist_miles"], 2),
+            "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
             "historical_visits": int(hist_visits),                      # Original competitor foot traffic
             "predicted_visits": round(est_retained_visits, 2), # Traffic they keep after your store opens
             "attraction": round(p_existing, 4),                     # Their customer retention probability
