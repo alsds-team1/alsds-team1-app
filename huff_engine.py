@@ -146,6 +146,25 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
             params=[matched_category, matched_category, matched_category],
         )
 
+        # Real competitor stores in this category, deduped per store (placekey),
+        # with their own coordinates, size, and total historical visits — used for
+        # the competitor table/charts/map (independent of the per-CBG aggregation
+        # above, which is only used to name each neighborhood's busiest store).
+        comp_pois_df = pd.read_sql(
+            """
+            SELECT p.location_name, p.placekey, p.latitude, p.longitude,
+                   p.wkt_area_sq_meters,
+                   COALESCE(SUM(v.visit_count), 0) AS hist_visits
+            FROM pois AS p
+            LEFT JOIN cbg_poi_visits AS v ON v.placekey = p.placekey
+            WHERE p.top_category = ?
+            GROUP BY p.location_name, p.placekey, p.latitude, p.longitude,
+                     p.wkt_area_sq_meters
+            """,
+            conn,
+            params=[matched_category],
+        )
+
     # CBGs without a projected centroid can't be scored. Dropping them keeps NaN
     # distances out of the totals; otherwise they inflate total demand while
     # contributing zero predicted visits, which understates market share.
@@ -181,6 +200,50 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
     # NOT because the location is bad. Flag this so callers don't misread the zeros.
     no_demand_data = total_demand <= 0
 
+    # --- Real competitor stores -------------------------------------------------
+    # One row per store (the SQL GROUP BY already deduped by placekey). For each we
+    # compute its straight-line distance from the candidate site, its size, its
+    # total historical visits, and a relative Huff "pull" (size^a / dist^b,
+    # normalized so the strongest = 1.0). Ranked nearest-first, capped at 12.
+    competitor_pois = []
+    try:
+        rows = []
+        for _, rr in comp_pois_df.iterrows():
+            if pd.isna(rr["latitude"]) or pd.isna(rr["longitude"]):
+                continue
+            px, py = transformer.transform(float(rr["longitude"]), float(rr["latitude"]))
+            dist_m = max((((px - new_x) ** 2 + (py - new_y) ** 2) ** 0.5), 0.1)
+            size_sqm = 0.0 if pd.isna(rr["wkt_area_sq_meters"]) else float(rr["wkt_area_sq_meters"])
+            hist = 0.0 if pd.isna(rr["hist_visits"]) else float(rr["hist_visits"])
+            pull_raw = (size_sqm ** alpha) / (dist_m ** beta) if size_sqm > 0 else 0.0
+            rows.append({
+                "name": str(rr["location_name"]),
+                "lat": float(rr["latitude"]),
+                "lon": float(rr["longitude"]),
+                "distance_miles": round(dist_m / 1609.34, 2),
+                "size": round(size_sqm),
+                "visits_per_day": round(hist, 1),
+                "_pull_raw": pull_raw,
+            })
+
+        max_pull = max((x["_pull_raw"] for x in rows), default=0.0) or 1.0
+        rows.sort(key=lambda x: x["distance_miles"])
+        for x in rows[:12]:
+            rel = round(x["_pull_raw"] / max_pull, 3)
+            competitor_pois.append({
+                "name": x["name"],
+                "lat": x["lat"],
+                "lon": x["lon"],
+                "distance_miles": x["distance_miles"],
+                "size": x["size"],
+                "visits_per_day": x["visits_per_day"],
+                "huff_pull": rel,
+                "attraction": rel,  # alias so map.js popups show a value
+            })
+    except Exception as e:
+        print(f"Warning: could not build competitor stores: {e}")
+        competitor_pois = []
+
     # Preserve the full DataFrame for the downstream wrapper function
     details = cbg_data.copy()
 
@@ -199,6 +262,7 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
         "market_share": market_share,
         "runtime_seconds": runtime_seconds,
         "details": details, # Passing the full DataFrame to the wrapper
+        "competitor_pois": competitor_pois,
     }
 
 def _build_notes(result: Dict[str, Any]) -> str:
@@ -292,37 +356,20 @@ def run_huff_model(
         })
 
     # =========================================================
-    # List 2: Top Competitor Entities (Top Competitors)
-    # Sorted descending by their historical visit counts to identify primary rivals
+    # List 2: Real competitor stores (deduped, real coordinates)
+    # Built in predict_site from the pois/visits tables: real distance from the
+    # candidate, store size, historical visits/day, and relative Huff pull.
     # =========================================================
-    # Filter out rows without actual competitor store data, then take the strongest ones
-    comp_rows = details.dropna(subset=["top_location_name"]).sort_values("top_poi_visit_count", ascending=False).head(10)
-    competitors_list = []
-    
-    for _, row in comp_rows.iterrows():
-        hist_visits = float(row['top_poi_visit_count'])
-        p_existing = float(row['p_existing']) # The probability that the competitor retains its customers
-        
-        # Core Calculation: Historical Visits * Retention Probability = Estimated Remaining Visits
-        est_retained_visits = hist_visits * p_existing
-        
-        # True Competitor Market Share = Their remaining visits / Total market demand
-        comp_market_share = (est_retained_visits / total_market_demand) if total_market_demand else 0.0
-
-        competitors_list.append({
-            "name": str(row['top_location_name']),
-            "placekey": str(row['top_placekey']),
-            "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
-            "historical_visits": int(hist_visits),                      # Original competitor foot traffic
-            "predicted_visits": round(est_retained_visits, 2), # Traffic they keep after your store opens
-            "attraction": round(p_existing, 4),                     # Their customer retention probability
-            "market_share": round(comp_market_share, 6),                 # Their adjusted market share
-            "my_store_attraction": round(row["p_new"], 4),
-            "my_store_captured_visits": round(float(row.get('predicted_visits', 0.0)), 2)
-        })
+    competitors_list = result.get("competitor_pois", [])
 
     # Clean up the large DataFrame to free memory
     # Compute a simple scalar representation of the candidate location's
+    # attraction: the mean capture probability across all CBGs (p_new).
+    # This is provided to the frontend as a single reference value for charts.
+    if total_market_demand > 0:
+        candidate_attraction = total_pred / total_market_demand
+    else:
+        candidate_attraction = 0.0
 
     del result["details"]
 
@@ -340,7 +387,8 @@ def run_huff_model(
         "runtime_ms": round(result["runtime_seconds"] * 1000, 2),
         "notes": _build_notes(result),    # Assuming this function is defined elsewhere
         "competitors": competitors_list,  # Accurate list of rival stores
-        "top_cbgs": top_cbgs_list        # Accurate list of customer source neighborhoods
+        "top_cbgs": top_cbgs_list,        # Accurate list of customer source neighborhoods
+        "candidate_attraction": round(candidate_attraction, 6),
     }
 
 if __name__ == "__main__":
