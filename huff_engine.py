@@ -292,7 +292,7 @@ def run_huff_model(
         top_cbgs_list.append({
             "geoid": geoid_str,
             "name": cbg_name,
-            "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
+            "distance_miles": round(row["new_dist_miles"], 2),
             "demand_size": int(row["total_category_visits"]),
             "capture_probability": round(row["p_new"], 4), # Your store's capture probability for this area
             "predicted_visits": round(pred_vis, 2),
@@ -320,7 +320,7 @@ def run_huff_model(
         competitors_list.append({
             "name": str(row['top_location_name']),
             "placekey": str(row['top_placekey']),
-            "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
+            "distance_miles": round(row["new_dist_miles"], 2),
             "historical_visits": int(hist_visits),                      # Original competitor foot traffic
             "predicted_visits": round(est_retained_visits, 2), # Traffic they keep after your store opens
             "attraction": round(p_existing, 4),                     # Their customer retention probability
