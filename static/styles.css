@@ -44,6 +44,8 @@ body {
   gap: 20px;
   padding: 20px;
   align-items: start;          /* chat & work column size independently */
+  max-width: 1440px;           /* match the hero so wide screens stay cohesive */
+  margin: 0 auto;              /* center instead of stretching edge-to-edge */
 }
 
 /* Right-hand column: toggles + map + results stack vertically */
@@ -265,7 +267,7 @@ th {
 }
 .als-root a { color: inherit; }
 
-.als-wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+.als-wrap { max-width: 1440px; margin: 0 auto; padding: 0 28px; }
 
 /* top bar — transparent so the generic header style can't darken it */
 .als-top {
