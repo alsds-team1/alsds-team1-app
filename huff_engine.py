@@ -204,7 +204,11 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
     # One row per store (the SQL GROUP BY already deduped by placekey). For each we
     # compute its straight-line distance from the candidate site, its size, its
     # total historical visits, and a relative Huff "pull" (size^a / dist^b,
-    # normalized so the strongest = 1.0). Ranked nearest-first, capped at 12.
+    # normalized so the strongest = 1.0). We keep only stores WITHIN a radius of the
+    # candidate pin, so the list genuinely changes as the location moves (and shrinks
+    # to zero in areas with no nearby competitors). Capped for readability.
+    COMPETITOR_RADIUS_MILES = 3.0
+    COMPETITOR_MAX = 15
     competitor_pois = []
     try:
         rows = []
@@ -213,6 +217,9 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
                 continue
             px, py = transformer.transform(float(rr["longitude"]), float(rr["latitude"]))
             dist_m = max((((px - new_x) ** 2 + (py - new_y) ** 2) ** 0.5), 0.1)
+            dist_mi = dist_m / 1609.34
+            if dist_mi > COMPETITOR_RADIUS_MILES:
+                continue  # outside the radius -> excluded, so the list tracks the pin
             size_sqm = 0.0 if pd.isna(rr["wkt_area_sq_meters"]) else float(rr["wkt_area_sq_meters"])
             hist = 0.0 if pd.isna(rr["hist_visits"]) else float(rr["hist_visits"])
             pull_raw = (size_sqm ** alpha) / (dist_m ** beta) if size_sqm > 0 else 0.0
@@ -220,15 +227,16 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
                 "name": str(rr["location_name"]),
                 "lat": float(rr["latitude"]),
                 "lon": float(rr["longitude"]),
-                "distance_miles": round(dist_m / 1609.34, 2),
+                "distance_miles": round(dist_mi, 2),
                 "size": round(size_sqm),
                 "visits_per_day": round(hist, 1),
                 "_pull_raw": pull_raw,
             })
 
+        # Normalize pull within the stores actually shown (so the strongest nearby = 1.0).
         max_pull = max((x["_pull_raw"] for x in rows), default=0.0) or 1.0
         rows.sort(key=lambda x: x["distance_miles"])
-        for x in rows[:12]:
+        for x in rows[:COMPETITOR_MAX]:
             rel = round(x["_pull_raw"] / max_pull, 3)
             competitor_pois.append({
                 "name": x["name"],
