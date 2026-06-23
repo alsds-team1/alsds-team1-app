@@ -82,9 +82,9 @@ async function sendUserTurn(text) {
     // If the model ran the Huff tool this turn, render its real output.
     if (data.huff_result) {
       const r = data.huff_result;
-      renderResult(r);
-      updateCompetitorsChart(r.competitors);
-      renderMarketSharePie(r);
+        renderResult(r);
+        updateCompetitorsChart(r.competitors, r.candidate_attraction);
+        renderMarketSharePie(r);
 
       if (window.setCandidateLocation &&
           typeof r.candidate_lat === "number" &&
@@ -255,7 +255,7 @@ function renderMarketSharePie(result) {
   });
 }
 
-function updateCompetitorsChart(competitors) {
+function updateCompetitorsChart(competitors, candidateAttraction) {
   const section = document.getElementById("chartSection");
   if (!section) return;
 
@@ -289,6 +289,43 @@ function updateCompetitorsChart(competitors) {
   }
 
   const ctx = document.getElementById("topCompetitorsChart").getContext("2d");
+
+  // Use the backend-provided candidateAttraction if available; otherwise fall back to the
+  // mean of current competitor attraction values.
+  const meanAttraction = (typeof candidateAttraction === 'number' && !isNaN(candidateAttraction))
+    ? Number(candidateAttraction)
+    : (data.reduce((a,b) => a + (Number(b)||0), 0) / Math.max(1, data.length));
+
+  // A small plugin to draw a horizontal line at y = meanAttraction.
+  const drawMeanLinePlugin = {
+    id: 'drawMeanLine',
+    afterDatasetsDraw: (chart) => {
+      const yScale = chart.scales['y'];
+      if (!yScale) return;
+      const yValue = meanAttraction;
+      const yPixel = yScale.getPixelForValue(yValue);
+
+      const ctx2 = chart.ctx;
+      ctx2.save();
+      ctx2.beginPath();
+      ctx2.moveTo(chart.chartArea.left, yPixel);
+      ctx2.lineTo(chart.chartArea.right, yPixel);
+      ctx2.lineWidth = 2;
+      ctx2.strokeStyle = 'rgba(220, 138, 38, 0.85)'; // reddish
+      ctx2.setLineDash([6, 4]);
+      ctx2.stroke();
+
+      // Draw label on the right side
+      ctx2.fillStyle = 'rgba(220,38,38,0.95)';
+      ctx2.font = '12px Arial';
+      const label = `Candidate mean: ${meanAttraction.toFixed(4)}`;
+      const textWidth = ctx2.measureText(label).width;
+      const px = chart.chartArea.right - textWidth - 6;
+      const py = yPixel - 6;
+      ctx2.fillText(label, px, py);
+      ctx2.restore();
+    }
+  };
 
   competitorsChart = new Chart(ctx, {
     type: "bar",
@@ -331,6 +368,8 @@ function updateCompetitorsChart(competitors) {
         }
       }
     }
+    ,
+    plugins: [drawMeanLinePlugin]
   });
 }
 

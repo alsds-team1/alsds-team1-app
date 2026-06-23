@@ -157,9 +157,18 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
         ((cbg_data["x_26919"] - new_x) ** 2 + (cbg_data["y_26919"] - new_y) ** 2) ** 0.5
     ).clip(lower=0.1)
 
+    # Core logic correction: Separate probability calculations
     cbg_data["u_new"] = (float(store_area_sq_m) ** alpha) / (cbg_data["new_dist_m"] ** beta)
-    cbg_data["p_new"] = cbg_data["u_new"] / (cbg_data["u_new"] + cbg_data["total_u_existing"])
+    
+    # 1. Calculate capture probability and predicted visits for [YOUR NEW STORE]
+    # Using .fillna(0) to prevent division by zero if both utilities are 0
+    cbg_data["p_new"] = (cbg_data["u_new"] / (cbg_data["u_new"] + cbg_data["total_u_existing"])).fillna(0)
     cbg_data["predicted_visits"] = cbg_data["p_new"] * cbg_data["total_category_visits"]
+
+    # 2. Calculate retention probability and remaining visits for [EXISTING COMPETITORS]
+    # This represents the market share competitors manage to keep after your store opens
+    cbg_data["p_existing"] = (cbg_data["total_u_existing"] / (cbg_data["u_new"] + cbg_data["total_u_existing"])).fillna(0)
+    cbg_data["existing_competitor_visits"] = cbg_data["p_existing"] * cbg_data["total_category_visits"]
 
     total_predicted_visits = float(cbg_data["predicted_visits"].sum())
     total_demand = float(cbg_data["total_category_visits"].sum())
@@ -172,7 +181,8 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
     # NOT because the location is bad. Flag this so callers don't misread the zeros.
     no_demand_data = total_demand <= 0
 
-    details = cbg_data.sort_values("predicted_visits", ascending=False)
+    # Preserve the full DataFrame for the downstream wrapper function
+    details = cbg_data.copy()
 
     return {
         "matched_category": matched_category,
@@ -188,9 +198,8 @@ def predict_site(lat: float, lon: float, category_query: str, store_area_sq_m: f
         "total_predicted_visits": total_predicted_visits,
         "market_share": market_share,
         "runtime_seconds": runtime_seconds,
-        "details": details,
+        "details": details, # Passing the full DataFrame to the wrapper
     }
-
 
 def _build_notes(result: Dict[str, Any]) -> str:
     """Human-readable transparency note for the UI / chatbot.
@@ -246,54 +255,80 @@ def run_huff_model(
     db_connection is accepted for compatibility with the provided starter app, but this
     engine uses get_connection() from db.py so Azure SQL is always used.
     """
+    
     result = predict_site(candidate_lat, candidate_lon, business_category, floor_area)
     details = result["details"]
-
-    # Include joined POI columns so we can display a human-friendly location_name
-    top_cbg_rows = details[
-        [
-            "geoid",
-            "total_category_visits",
-            "total_u_existing",
-            "new_dist_m",
-            "p_new",
-            "predicted_visits",
-            "top_location_name",
-            "top_placekey",
-            "top_poi_visit_count",
-        ]
-    ].head(10)
-
-    # Convert to frontend-expected format for the competitors table
+    
     # Load GeoJSON mapping for better CBG names
-    geoid_to_name = _load_geoid_to_name_mapping()
+    geoid_to_name = _load_geoid_to_name_mapping() 
+    
+    total_market_demand = float(result["total_demand"])
+    total_pred = float(result["total_predicted_visits"])
 
-    competitors_sample = []
-    for idx, row in top_cbg_rows.iterrows():
-        geoid = str(row['geoid'])
-        # Prefer a POI location_name from the joined top-POI per CBG (if available).
-        # Otherwise fall back to the GeoJSON-derived CBG name as before.
-        location_name = None
-        if 'top_location_name' in row and row['top_location_name'] and not pd.isna(row['top_location_name']):
-            location_name = str(row['top_location_name'])
-
+    # =========================================================
+    # List 1: Top Customer Source Areas (Top CBGs)
+    # Sorted descending by the predicted visits your store captures from them
+    # =========================================================
+    top_cbg_rows = details.sort_values("predicted_visits", ascending=False).head(10)
+    top_cbgs_list = []
+    
+    for _, row in top_cbg_rows.iterrows():
+        geoid_str = str(row['geoid'])
+        # The name here should be the census tract/neighborhood name, NOT a store name
+        cbg_name = geoid_to_name.get(geoid_str, f"Tract {geoid_str}")
+        
         pred_vis = float(row.get('predicted_visits', 0.0))
-        # Compute competitor market share as the share of total predicted visits
-        total_pred = float(result.get("total_predicted_visits", 0.0))
-        comp_market_share = (pred_vis / total_pred) if total_pred else 0.0
+        # This share indicates what percentage of YOUR store's total visits come from this specific CBG
+        contribution_share = (pred_vis / total_pred) if total_pred else 0.0
 
-        competitors_sample.append({
-            "name": location_name,
+        top_cbgs_list.append({
+            "geoid": geoid_str,
+            "name": cbg_name,
             "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
-            "size": int(row["total_category_visits"]),
-            "attraction": round(row["p_new"], 4),
-            # Also keep raw data for backend use
-            "geoid": row["geoid"],
+            "demand_size": int(row["total_category_visits"]),
+            "capture_probability": round(row["p_new"], 4), # Your store's capture probability for this area
             "predicted_visits": round(pred_vis, 2),
-            "market_share": round(comp_market_share, 6),
-            "top_placekey": row.get('top_placekey'),
-            "top_poi_visit_count": int(row['top_poi_visit_count']) if 'top_poi_visit_count' in row and not pd.isna(row['top_poi_visit_count']) else None,
+            "contribution_share": round(contribution_share, 4)
         })
+
+    # =========================================================
+    # List 2: Top Competitor Entities (Top Competitors)
+    # Sorted descending by their historical visit counts to identify primary rivals
+    # =========================================================
+    # Filter out rows without actual competitor store data, then take the strongest ones
+    comp_rows = details.dropna(subset=["top_location_name"]).sort_values("top_poi_visit_count", ascending=False).head(10)
+    competitors_list = []
+    
+    for _, row in comp_rows.iterrows():
+        hist_visits = float(row['top_poi_visit_count'])
+        p_existing = float(row['p_existing']) # The probability that the competitor retains its customers
+        
+        # Core Calculation: Historical Visits * Retention Probability = Estimated Remaining Visits
+        est_retained_visits = hist_visits * p_existing
+        
+        # True Competitor Market Share = Their remaining visits / Total market demand
+        comp_market_share = (est_retained_visits / total_market_demand) if total_market_demand else 0.0
+
+        competitors_list.append({
+            "name": str(row['top_location_name']),
+            "placekey": str(row['top_placekey']),
+            "distance_miles": round(row["new_dist_m"] / 1609.34, 2),
+            "historical_visits": int(hist_visits),                      # Original competitor foot traffic
+            "predicted_retained_visits": round(est_retained_visits, 2), # Traffic they keep after your store opens
+            "retention_rate": round(p_existing, 4),                     # Their customer retention probability
+            "market_share": round(comp_market_share, 6)                 # Their adjusted market share
+        })
+
+    # Clean up the large DataFrame to free memory
+    # Compute a simple scalar representation of the candidate location's
+    # attraction: the mean capture probability across all CBGs (p_new).
+    # This is provided to the frontend as a single reference value for charts.
+    try:
+        candidate_attraction = float(details["p_new"].mean())
+    except Exception:
+        candidate_attraction = 0.0
+
+    del result["details"]
 
     return {
         "matched_category": result["matched_category"],
@@ -303,15 +338,15 @@ def run_huff_model(
         "correlation": result["correlation"],
         "used_fallback": result["used_fallback"],
         "no_demand_data": result["no_demand_data"],
-        "total_demand": round(result["total_demand"], 2),
-        "predicted_visits": round(result["total_predicted_visits"], 2),
+        "total_demand": round(total_market_demand, 2),
+        "predicted_visits": round(total_pred, 2),
         "market_share": round(result["market_share"], 6),
         "runtime_ms": round(result["runtime_seconds"] * 1000, 2),
-        "notes": _build_notes(result),
-        "competitors": competitors_sample,
-        "top_cbgs": competitors_sample,
+        "notes": _build_notes(result),    # Assuming this function is defined elsewhere
+        "competitors": competitors_list,  # Accurate list of rival stores
+        "top_cbgs": top_cbgs_list,        # Accurate list of customer source neighborhoods
+        "candidate_attraction": round(candidate_attraction, 6),
     }
-
 
 if __name__ == "__main__":
     output = run_huff_model(42.27, -71.80, "Liquor Stores", 2500.0)
