@@ -5,12 +5,6 @@
 #### Web direction: https://alsds-team1-app-e3fed9azh2fpb4ej.eastus-01.azurewebsites.net/
 
 ---
-# Changelog
-
-All notable changes to the Spatial Intelligence Platform (SIP) are documented here.
-Newest releases first. These entries sit above the existing `v2.0.1 — Azure SQL Backend`.
-
----
 
 ## v2.6.0 — Responsive Layout
 
