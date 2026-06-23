@@ -1,7 +1,7 @@
 const chatMessages = document.getElementById("chatMessages");
 const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
- 
+
 // Declared at top level so we can destroy the old chart instance before redrawing.
 let competitorsChart = null;
 // Separate Chart instance for the market-share pie
@@ -180,14 +180,37 @@ function renderMarketSharePie(result) {
   const pieCanvas = document.getElementById('marketSharePie');
   if (!pieCanvas) return;
 
-  // The only coherent slice from the model: your store's share of total category
-  // demand vs. everything the existing competitors keep. Built from market_share,
-  // so it always agrees with the scorecard.
-  const candidateShare = Math.max(0, Math.min(1, Number(result.market_share) || 0));
-  const competitorShare = Math.max(0, 1 - candidateShare);
+  // Share of daily visits among your store (predicted) and the nearby competitors.
+  // This is the split AMONG these players — not your share of all Worcester demand
+  // (that true figure, ~0.45%, stays in the scorecard). No "Other" catch-all slice.
+  const competitors = Array.isArray(result.competitors) ? result.competitors : [];
+  const candidateVisits = Number(result.predicted_visits) || 0;
 
-  const labels = ['Your store', 'Existing competitors'];
-  const values = [candidateShare, competitorShare];
+  const labels = ['Your store'];
+  const values = [candidateVisits];
+  competitors.slice(0, 10).forEach(c => {
+    const v = Number(c.visits_per_day) || 0;
+    if (v > 0) {
+      labels.push(c.name ?? 'Competitor');
+      values.push(v);
+    }
+  });
+
+  const total = values.reduce((a, b) => a + b, 0) || 1;
+
+  const palette = [
+    'rgba(14, 165, 164, 0.9)',   // Your store — teal highlight
+    'rgba(99, 102, 241, 0.7)',
+    'rgba(236, 72, 153, 0.7)',
+    'rgba(34, 197, 94, 0.7)',
+    'rgba(249, 115, 22, 0.7)',
+    'rgba(59, 130, 246, 0.7)',
+    'rgba(168, 85, 247, 0.7)',
+    'rgba(20, 184, 166, 0.7)',
+    'rgba(245, 158, 11, 0.7)',
+    'rgba(100, 116, 139, 0.7)',
+    'rgba(190, 24, 93, 0.6)'
+  ];
 
   if (marketShareChart) {
     try { marketShareChart.destroy(); } catch (e) {}
@@ -201,7 +224,7 @@ function renderMarketSharePie(result) {
       labels: labels,
       datasets: [{
         data: values,
-        backgroundColor: ['rgba(14, 165, 164, 0.85)', 'rgba(148, 163, 184, 0.40)'],
+        backgroundColor: labels.map((_, i) => palette[i % palette.length]),
         borderColor: 'rgba(255,255,255,0.9)',
         borderWidth: 2
       }]
@@ -211,10 +234,14 @@ function renderMarketSharePie(result) {
       maintainAspectRatio: false,
       animation: { duration: 600, easing: 'easeOutQuart' },
       plugins: {
-        legend: { position: 'right', labels: { boxWidth: 12, padding: 8 } },
+        legend: { position: 'right', labels: { boxWidth: 12, padding: 6 } },
         tooltip: {
           callbacks: {
-            label: (ctx) => `${ctx.label}: ${(Number(ctx.raw) * 100).toFixed(2)}%`
+            label: (ctx) => {
+              const v = Number(ctx.raw) || 0;
+              const pct = (v / total) * 100;
+              return `${ctx.label}: ${pct.toFixed(1)}% (${v.toFixed(1)} visits/day)`;
+            }
           }
         }
       }
