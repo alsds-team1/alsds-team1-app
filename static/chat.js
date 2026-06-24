@@ -84,9 +84,9 @@ async function sendUserTurn(text) {
     // If the model ran the Huff tool this turn, render its real output.
     if (data.huff_result) {
       const r = data.huff_result;
-        renderResult(r);
-        updateCompetitorsChart(r.competitors, r.predicted_visits);
-        renderMarketSharePie(r);
+      renderResult(r);
+      updateCompetitorsChart(r.competitors, r.predicted_visits);
+      renderMarketSharePie(r);
 
       if (window.setCandidateLocation &&
           typeof r.candidate_lat === "number" &&
@@ -97,6 +97,27 @@ async function sendUserTurn(text) {
       if (window.plotCompetitors && Array.isArray(r.competitors)) {
         window.plotCompetitors(r.competitors);
       }
+
+      // ==========================================
+      // Switch to the results view (show the chart and table, hide the map) so the user sees the output immediately.
+      // ==========================================
+      const showResultBtn = document.getElementById("showResultBtn");
+      const showMapBtn = document.getElementById("showMapBtn");
+      const chartSection = document.getElementById("chartSection");
+      const modelResultPanel = document.getElementById("modelResultPanel");
+      const mapPanel = document.querySelector(".map-panel");
+
+      // Toggle the active state of the buttons to reflect the current view.
+      if (showResultBtn) showResultBtn.classList.add("active");
+      if (showMapBtn) showMapBtn.classList.remove("active");
+
+      // Show the results panel
+      if (chartSection) chartSection.classList.remove("hidden");
+      if (modelResultPanel) modelResultPanel.classList.remove("hidden");
+
+      // Hide the map panel
+      if (mapPanel) mapPanel.classList.add("hidden");
+      // ==========================================
     }
   } catch (error) {
     removeMessage(typing);
