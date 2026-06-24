@@ -113,9 +113,9 @@ function renderResult(result) {
   const tableWrap = document.getElementById("competitorTable");
 
   const visits = result.predicted_visits;
-  const visitsText = (visits === null || visits === undefined || visits === "") ? "N/A" : String(visits);
+  const visitsText = Number.isFinite(Number(visits)) ? Number(visits).toFixed(2) : "N/A";
   const marketShare = Number(result.market_share);
-  const sharePct = Number.isFinite(marketShare) ? (marketShare * 100).toFixed(2) : null;
+  const sharePct = Number.isFinite(marketShare) ? (marketShare * 100).toFixed(4) : null;
   const totalDemand = result.total_demand;
   const runtime = result.runtime_ms ?? "N/A";
   const floorArea = result.floor_area;
@@ -135,6 +135,9 @@ function renderResult(result) {
         <div class="card-value">${totalDemand != null ? escapeHtml(totalDemand) : "N/A"}<span class="card-unit">visits/day</span></div>
         <div class="card-label">Worcester demand</div>
       </div>
+      <div class="prediction-highlight">
+  Main prediction: this location is expected to receive ${escapeHtml(visitsText)} visits/day.
+</div>
     </div>
     <div class="result-meta">
       ${floorArea ? `<span><strong>Floor area:</strong> ${escapeHtml(floorArea)} m²</span>` : ""}
