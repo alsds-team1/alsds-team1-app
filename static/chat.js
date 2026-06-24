@@ -311,7 +311,7 @@ function updateCompetitorsChart(competitors, candidatePredVisits) {
 
       c2.fillStyle = 'rgba(180, 83, 9, 0.95)';
       c2.font = '12px Arial';
-      const label = `Your store (predicted): ${candidateRefVisits.toFixed(1)}/day`;
+  const label = `Your store (predicted): ${candidateRefVisits.toFixed(2)}/day`;
       const tw = c2.measureText(label).width;
       c2.fillText(label, chart.chartArea.right - tw - 6, yPixel - 6);
       c2.restore();
@@ -347,11 +347,16 @@ function updateCompetitorsChart(competitors, candidatePredVisits) {
           }
         }
       },
-      scales: {
+         scales: {
         y: {
-          beginAtZero: true,
-          title: { display: true, text: "Visits/day" },
-          grid: { color: "rgba(15, 23, 42, 0.06)" }
+          type: "logarithmic",
+          title: {
+            display: true,
+            text: "Visits/day (log scale)"
+          },
+          grid: {
+            color: "rgba(15, 23, 42, 0.06)"
+          }
         },
         x: {
           grid: { display: false },
