@@ -512,26 +512,35 @@ th {
    ========================================= */
 .tabs-container {
   max-width: 1200px;
-  margin: 0 auto 10px auto;
+  margin: 0 auto 20px auto;
   display: flex;
-  gap: 10px;
+  gap: 30px;
   padding: 0 20px;
+  border-bottom: 1px solid var(--hairline);
 }
+
 .tab-btn {
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  padding: 10px 20px;
-  border-radius: 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent; 
+  padding: 10px 4px;
   cursor: pointer;
   font-family: var(--display);
   font-weight: 600;
-  color: var(--body);
+  font-size: 1rem;
+  color: var(--body-soft);
   transition: all 0.2s ease;
+  margin-bottom: -1px;
 }
+
+.tab-btn:hover {
+  color: var(--ink);
+}
+
 .tab-btn.active {
-  background: var(--pull);
-  color: #fff;
-  border-color: var(--pull-deep);
+  background: transparent;
+  color: var(--pull);
+  border-bottom-color: var(--pull);
 }
 
 .saved-item-card {

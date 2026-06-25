@@ -150,26 +150,65 @@
   <!-- =============== end homepage hero =============== -->
 
   <div class="tabs-container">
-  <button id="tabCurrent" class="tab-btn active">Current prediction results</button>
-  <button id="tabSaved" class="tab-btn">Saved prediction results</button>
+    <button id="tabCurrent" class="tab-btn active">Current prediction results</button>
+    <button id="tabSaved" class="tab-btn">Saved prediction results</button>
   </div>
 
-  <main class="layout" id="tool">
-    <section id="modelResultPanel" class="panel result-panel hidden">
-      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
-        <h2>Model Result</h2>
-        <div class="actions">
-          <button id="saveResultBtn" class="als-btn als-btn-primary" style="padding: 4px 10px; font-size: 0.8rem;">Save result</button>
-          <button id="exportResultBtn" class="als-btn" style="padding: 4px 10px; font-size: 0.8rem;">Export result file</button>
-        </div>
+   <main class="layout" id="tool">
+    <section class="panel chat-panel">
+      <h2>Guided Chatbot</h2>
+
+      <div id="chatMessages" class="chat-messages"></div>
+
+      <div class="input-row">
+        <input id="chatInput" type="text" placeholder="Type your answer or question..." />
+        <button id="sendBtn">Send</button>
       </div>
 
-      <div id="resultSummary" class="result-summary">
-        No model result yet.
+      <div class="hint">
+        Tip: enter the location as coordinates, e.g. 42.24, -71.78.
       </div>
-      <h3>Nearby competitor stores</h3>
-      <div id="competitorTable" class="table-wrap"></div>
     </section>
+
+    <!-- Right-hand working column: toggles + map + results stacked -->
+    <div class="work-col">
+      <div class="right-toggle-row">
+        <button id="showMapBtn" class="toggle-btn active">Return to map</button>
+        <button id="showResultBtn" class="toggle-btn">Check predicted result</button>
+      </div>
+
+      <section class="panel map-panel">
+        <div id="mapContainer" class="map-container">
+          <h2>Map</h2>
+          <div id="map"></div>
+          <div id="selectedLocation" class="selected-location">
+            No candidate location selected yet.
+          </div>
+        </div>
+      </section>
+
+      <section id="chartSection" class="panel result-panel hidden">
+        <h2>Top competitors by visits/day</h2>
+        <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
+          <canvas id="topCompetitorsChart"></canvas>
+        </div>
+        <h3>Visit share vs nearby competitors</h3>
+        <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
+          <canvas id="marketSharePie"></canvas>
+        </div>
+      </section>
+
+      <section id="modelResultPanel" class="panel result-panel hidden">
+        <h2>Model Result</h2>
+
+        <div id="resultSummary" class="result-summary">
+          No model result yet.
+        </div>
+
+        <h3>Nearby competitor stores</h3>
+        <div id="competitorTable" class="table-wrap"></div>
+      </section>
+    </div>
   </main>
 
   <main class="layout hidden" id="savedPanel">
