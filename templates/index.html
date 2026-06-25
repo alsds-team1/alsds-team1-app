@@ -149,62 +149,66 @@
   </div>
   <!-- =============== end homepage hero =============== -->
 
+  <div class="tabs-container">
+  <button id="tabCurrent" class="tab-btn active">Current prediction results</button>
+  <button id="tabSaved" class="tab-btn">Saved prediction results</button>
+  </div>
+
   <main class="layout" id="tool">
-    <section class="panel chat-panel">
-      <h2>Guided Chatbot</h2>
-
-      <div id="chatMessages" class="chat-messages"></div>
-
-      <div class="input-row">
-        <input id="chatInput" type="text" placeholder="Type your answer or question..." />
-        <button id="sendBtn">Send</button>
-      </div>
-
-      <div class="hint">
-        Tip: enter the location as coordinates, e.g. 42.24, -71.78.
-      </div>
-    </section>
-
-    <!-- Right-hand working column: toggles + map + results stacked -->
-    <div class="work-col">
-      <div class="right-toggle-row">
-        <button id="showMapBtn" class="toggle-btn active">Return to map</button>
-        <button id="showResultBtn" class="toggle-btn">Check predicted result</button>
-      </div>
-
-      <section class="panel map-panel">
-        <div id="mapContainer" class="map-container">
-          <h2>Map</h2>
-          <div id="map"></div>
-          <div id="selectedLocation" class="selected-location">
-            No candidate location selected yet.
-          </div>
-        </div>
-      </section>
-
-      <section id="chartSection" class="panel result-panel hidden">
-        <h2>Top competitors by visits/day</h2>
-        <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
-          <canvas id="topCompetitorsChart"></canvas>
-        </div>
-        <h3>Visit share vs nearby competitors</h3>
-        <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
-          <canvas id="marketSharePie"></canvas>
-        </div>
-      </section>
-
-      <section id="modelResultPanel" class="panel result-panel hidden">
+    <section id="modelResultPanel" class="panel result-panel hidden">
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
         <h2>Model Result</h2>
-
-        <div id="resultSummary" class="result-summary">
-          No model result yet.
+        <div class="actions">
+          <button id="saveResultBtn" class="als-btn als-btn-primary" style="padding: 4px 10px; font-size: 0.8rem;">Save result</button>
+          <button id="exportResultBtn" class="als-btn" style="padding: 4px 10px; font-size: 0.8rem;">Export result file</button>
         </div>
+      </div>
 
-        <h3>Nearby competitor stores</h3>
-        <div id="competitorTable" class="table-wrap"></div>
-      </section>
+      <div id="resultSummary" class="result-summary">
+        No model result yet.
+      </div>
+      <h3>Nearby competitor stores</h3>
+      <div id="competitorTable" class="table-wrap"></div>
+    </section>
+  </main>
+
+  <main class="layout hidden" id="savedPanel">
+    <div class="panel" style="width: 100%; grid-column: 1 / -1;">
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>Saved prediction results</h2>
+        <button id="importDataBtn" class="als-btn als-btn-primary">Import data</button>
+      </div>
+      
+      <div id="noSavedMsg" style="padding: 20px; color: var(--body-soft);">No saved results</div>
+      <div id="savedListContainer" class="hidden" style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
+        </div>
     </div>
   </main>
+
+  <div id="importModal" class="custom-modal hidden">
+    <div class="modal-content">
+      <h3>Import JSON Data</h3>
+      <div id="dropZone" class="drop-zone">
+        <p>Drag & Drop your JSON file here or <span id="browseFileText" style="color: var(--action); cursor: pointer; text-decoration: underline;">Browse</span></p>
+        <input type="file" id="fileInput" accept=".json" class="hidden" />
+      </div>
+      <div style="text-align: right; margin-top: 10px;">
+        <button id="closeImportBtn" class="als-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="compareModal" class="custom-modal hidden">
+    <div class="modal-content" style="max-width: 700px;">
+      <h3>Compare Results</h3>
+      <div class="chart-container" style="position: relative; height: 350px; width: 100%; margin-top: 15px;">
+        <canvas id="compareChartCanvas"></canvas>
+      </div>
+      <div style="text-align: right; margin-top: 15px;">
+        <button id="closeCompareBtn" class="als-btn als-btn-primary">Close</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

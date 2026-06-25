@@ -1,3 +1,7 @@
+let current_huff_result = null; // The most recent Huff tool result returned by the server. Used to avoid re-rendering if the model returns the same result twice in a row.
+let result_array = [];          // Array of Huff tool results for comparison. Each element is a Huff result object.
+let compareChartInst = null;    // Chart.js instance for the comparison chart. We destroy and recreate it when the data changes.
+
 const chatMessages = document.getElementById("chatMessages");
 const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
@@ -83,6 +87,7 @@ async function sendUserTurn(text) {
 
     // If the model ran the Huff tool this turn, render its real output.
     if (data.huff_result) {
+      current_huff_result = data.huff_result;
       const r = data.huff_result;
       renderResult(r);
       updateCompetitorsChart(r.competitors, r.predicted_visits);
@@ -449,3 +454,227 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+
+// ==========================================
+// New features: Save, Export, Import, and Compare panel logic
+// ==========================================
+
+// 1. Tab switching logic
+document.getElementById('tabCurrent').addEventListener('click', () => {
+  document.getElementById('tool').classList.remove('hidden');
+  document.getElementById('savedPanel').classList.add('hidden');
+  document.getElementById('tabCurrent').classList.add('active');
+  document.getElementById('tabSaved').classList.remove('active');
+});
+
+document.getElementById('tabSaved').addEventListener('click', () => {
+  document.getElementById('tool').classList.add('hidden');
+  document.getElementById('savedPanel').classList.remove('hidden');
+  document.getElementById('tabSaved').classList.add('active');
+  document.getElementById('tabCurrent').classList.remove('active');
+});
+
+// 2. Export and Save functionality
+document.getElementById('exportResultBtn').addEventListener('click', () => {
+  if (!current_huff_result) return alert('No current result to export. Please run a prediction first.');
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(current_huff_result, null, 4));
+  const downloadAnchorNode = document.createElement('a');
+  downloadAnchorNode.setAttribute("href", dataStr);
+  downloadAnchorNode.setAttribute("download", `huff_result_${new Date().getTime()}.json`);
+  document.body.appendChild(downloadAnchorNode);
+  downloadAnchorNode.click();
+  downloadAnchorNode.remove();
+});
+
+document.getElementById('saveResultBtn').addEventListener('click', () => {
+  if (!current_huff_result) return alert('No result to save.');
+  
+  // Clone the data and append a timestamp
+  const savedItem = JSON.parse(JSON.stringify(current_huff_result));
+  savedItem.save_time = new Date().toLocaleString();
+  savedItem.id = new Date().getTime(); // Unique ID
+  
+  result_array.push(savedItem);
+  renderSavedList();
+  alert('Result saved successfully!');
+});
+
+// 3. Render the saved list
+function renderSavedList() {
+  const container = document.getElementById('savedListContainer');
+  const emptyMsg = document.getElementById('noSavedMsg');
+  
+  if (result_array.length === 0) {
+    emptyMsg.style.display = 'block';
+    container.classList.add('hidden');
+    return;
+  }
+  
+  emptyMsg.style.display = 'none';
+  container.classList.remove('hidden');
+  container.innerHTML = '';
+  
+  result_array.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'saved-item-card';
+    card.innerHTML = `
+      <div class="saved-item-info">
+        <p><strong>Category:</strong> ${item.matched_category || 'N/A'} (NAICS: ${item.naics_code || 'N/A'})</p>
+        <p><strong>Location:</strong> Lat: ${item.candidate_lat}, Lon: ${item.candidate_lon}</p>
+        <p><strong>Floor Area:</strong> ${item.floor_area} sq m</p>
+        <p style="font-size: 0.8rem; color: #888;"><strong>Saved at:</strong> ${item.save_time}</p>
+      </div>
+      <div class="saved-item-actions">
+        <button class="btn-compare" onclick="openCompareModal(${item.id})">Compare</button>
+        <button class="btn-delete" onclick="deleteSavedItem(${item.id})">🗑️</button>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+// 4. Delete logic
+window.deleteSavedItem = function(id) {
+  if (confirm("Are you sure you want to delete this result?")) {
+    result_array = result_array.filter(item => item.id !== id);
+    renderSavedList();
+  }
+};
+
+// 5. Import functionality (Drag & Drop and File Selection)
+const importModal = document.getElementById('importModal');
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+document.getElementById('importDataBtn').addEventListener('click', () => {
+  importModal.classList.remove('hidden');
+});
+document.getElementById('closeImportBtn').addEventListener('click', () => {
+  importModal.classList.add('hidden');
+});
+document.getElementById('browseFileText').addEventListener('click', () => {
+  fileInput.click();
+});
+
+function handleFile(file) {
+  if (!file || file.type !== "application/json") {
+    return alert("Please upload a valid JSON file.");
+  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      
+      // Support direct object or nested within the 'huff_result' field
+      const data = parsed.huff_result ? parsed.huff_result : parsed;
+      
+      // Basic format validation
+      if (data && data.candidate_lat && data.floor_area) {
+        data.save_time = new Date().toLocaleString();
+        data.id = new Date().getTime();
+        result_array.push(data);
+        renderSavedList();
+        alert("File imported successfully!");
+        importModal.classList.add('hidden');
+      } else {
+        alert("Invalid format: Missing required fields (e.g. candidate_lat).");
+      }
+    } catch (err) {
+      alert("Error parsing JSON file.");
+    }
+  };
+  reader.readAsText(file);
+}
+
+fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragover');
+});
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    handleFile(e.dataTransfer.files[0]);
+  }
+});
+
+// 6. Chart comparison logic
+const compareModal = document.getElementById('compareModal');
+document.getElementById('closeCompareBtn').addEventListener('click', () => {
+  compareModal.classList.add('hidden');
+});
+
+window.openCompareModal = function(savedId) {
+  if (!current_huff_result) {
+    return alert("You don't have a 'Current' prediction result to compare against. Please run the model first.");
+  }
+  
+  const savedItem = result_array.find(item => item.id === savedId);
+  if (!savedItem) return;
+
+  compareModal.classList.remove('hidden');
+  const ctx = document.getElementById('compareChartCanvas').getContext('2d');
+  
+  if (compareChartInst) {
+    compareChartInst.destroy();
+  }
+
+  // Render the comparison chart. Due to the large variance in metrics (e.g., area 4000 vs market share 0.02), the Y-axis uses a logarithmic scale.
+  compareChartInst = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['Market Share', 'Total Demand', 'Predicted Visits', 'Floor Area'],
+      datasets: [
+        {
+          label: 'Current Result',
+          data: [
+            current_huff_result.market_share,
+            current_huff_result.total_demand,
+            current_huff_result.predicted_visits,
+            current_huff_result.floor_area
+          ],
+          backgroundColor: 'rgba(37, 99, 235, 0.8)', // Action Blue
+          borderRadius: 4
+        },
+        {
+          label: 'Saved Result',
+          data: [
+            savedItem.market_share,
+            savedItem.total_demand,
+            savedItem.predicted_visits,
+            savedItem.floor_area
+          ],
+          backgroundColor: 'rgba(14, 165, 164, 0.8)', // Pull Teal
+          borderRadius: 4
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return context.dataset.label + ': ' + context.raw;
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          type: 'logarithmic',
+          title: {
+            display: true,
+            text: 'Value (Log Scale)'
+          }
+        }
+      }
+    }
+  });
+};
