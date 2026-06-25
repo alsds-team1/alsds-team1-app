@@ -136,7 +136,7 @@ async function sendUserTurn(text) {
           
           // Core deceleration formula: move 12% of the remaining distance each frame
           // Large remaining distances result in faster movement, small remaining distances result in slower movement
-          window.scrollTo(0, currentPosition + distance * 0.12);
+          window.scrollTo(0, currentPosition + distance * 0.05);
           requestAnimationFrame(easeOutScroll);
         };
         
