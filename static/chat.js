@@ -459,7 +459,37 @@ function escapeHtml(value) {
 // New features: Save, Export, Import, and Compare panel logic
 // ==========================================
 
-// 1. Tab switching logic
+// 1. Tab switching logic (Modified for forced display override)
+const tabCurrent = document.getElementById('tabCurrent');
+const tabSaved = document.getElementById('tabSaved');
+const toolPanel = document.getElementById('tool');
+const savedPanel = document.getElementById('savedPanel');
+
+// Force the initial state: show Current panel, hide Saved panel
+if (savedPanel) {
+  savedPanel.style.display = 'none';
+}
+
+if (tabCurrent && tabSaved) {
+  tabCurrent.addEventListener('click', () => {
+    // Force show Current panel, hide Saved panel
+    if (toolPanel) toolPanel.style.display = '';     // Restore display
+    if (savedPanel) savedPanel.style.display = 'none'; // Force hide
+    
+    tabCurrent.classList.add('active');
+    tabSaved.classList.remove('active');
+  });
+
+  tabSaved.addEventListener('click', () => {
+    // Force hide Current panel, show Saved panel
+    if (toolPanel) toolPanel.style.display = 'none';   // Force hide
+    if (savedPanel) savedPanel.style.display = '';     // Restore display
+    
+    tabSaved.classList.add('active');
+    tabCurrent.classList.remove('active');
+  });
+}
+
 document.getElementById('tabCurrent').addEventListener('click', () => {
   document.getElementById('tool').classList.remove('hidden');
   document.getElementById('savedPanel').classList.add('hidden');

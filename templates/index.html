@@ -190,16 +190,22 @@
       <section id="chartSection" class="panel result-panel hidden">
         <h2>Top competitors by visits/day</h2>
         <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
-          <canvas id="topCompetitorsChart"></canvas>
+          <canvas id="topCompetitorsChart">No model result yet.</canvas>
         </div>
         <h3>Visit share vs nearby competitors</h3>
         <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
-          <canvas id="marketSharePie"></canvas>
+          <canvas id="marketSharePie">No model result yet.</canvas>
         </div>
       </section>
 
       <section id="modelResultPanel" class="panel result-panel hidden">
-        <h2>Model Result</h2>
+        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+          <h2>Model Result</h2>
+          <div class="actions">
+            <button id="saveResultBtn" class="als-btn als-btn-primary" style="padding: 4px 10px; font-size: 0.8rem;">Save result</button>
+            <button id="exportResultBtn" class="als-btn" style="padding: 4px 10px; font-size: 0.8rem;">Export result file</button>
+          </div>
+        </div>
 
         <div id="resultSummary" class="result-summary">
           No model result yet.
