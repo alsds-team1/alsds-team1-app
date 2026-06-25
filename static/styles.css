@@ -532,6 +532,11 @@ th {
   transition: all 0.2s ease;
   margin-bottom: -1px;
 }
+.tab-btn:hover {
+  background: transparent;
+  color: var(--body-soft);
+  border-bottom-color: var(--pull);
+}
 
 .tab-btn.active {
   background: transparent;
@@ -568,6 +573,12 @@ th {
   border-radius: 6px;
   cursor: pointer;
   font-size: 1rem;
+}
+.btn-delete:hover {
+  background-color: #b91c1c;
+  color: white;
+  border-color: #b91c1c;
+  cursor: pointer;
 }
 .btn-compare {
   background: var(--action);
@@ -651,3 +662,14 @@ th {
 .diff-positive { color: #0ea5a4; font-weight: 600; }
 .diff-negative { color: #dc4726; font-weight: 600; }
 .diff-zero { color: var(--body-soft); }
+
+#fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  border: 0;
+}
