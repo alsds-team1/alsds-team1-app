@@ -149,7 +149,7 @@
   </div>
   <!-- =============== end homepage hero =============== -->
 
-  <div class="tabs-container">
+  <div class="tabs-container" id="tabs">
     <button id="tabCurrent" class="tab-btn active">Current prediction results</button>
     <button id="tabSaved" class="tab-btn">Saved prediction results</button>
   </div>
@@ -202,8 +202,8 @@
         <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
           <h2>Model Result</h2>
           <div class="actions">
-            <button id="saveResultBtn" class="als-btn als-btn-primary" style="padding: 4px 10px; font-size: 0.8rem;">Save result</button>
-            <button id="exportResultBtn" class="als-btn" style="padding: 4px 10px; font-size: 0.8rem;">Export result file</button>
+            <button id="saveResultBtn" class="als-btn" style="padding: 6px 12px; font-size: 0.8rem;">Save result</button>
+            <button id="exportResultBtn" class="als-btn" style="padding: 6px 12px; font-size: 0.8rem;">Export result file</button>
           </div>
         </div>
 
@@ -244,16 +244,21 @@
   </div>
 
   <div id="compareModal" class="custom-modal hidden">
-    <div class="modal-content" style="max-width: 700px;">
-      <h3>Compare Results</h3>
-      <div class="chart-container" style="position: relative; height: 350px; width: 100%; margin-top: 15px;">
-        <canvas id="compareChartCanvas"></canvas>
+  <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+    <h3 style="margin-top: 0;">Compare Results</h3>
+    
+    <div class="chart-container" style="position: relative; height: 300px; width: 100%; margin-top: 15px;">
+      <canvas id="compareChartCanvas"></canvas>
+    </div>
+    
+    <div id="compareTableContainer" style="margin-top: 25px; overflow-x: auto;">
       </div>
-      <div style="text-align: right; margin-top: 15px;">
-        <button id="closeCompareBtn" class="als-btn als-btn-primary">Close</button>
-      </div>
+    
+    <div style="text-align: right; margin-top: 20px;">
+      <button id="closeCompareBtn" class="als-btn als-btn-primary">Close</button>
     </div>
   </div>
+</div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

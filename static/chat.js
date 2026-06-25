@@ -121,10 +121,10 @@ async function sendUserTurn(text) {
       if (modelResultPanel) modelResultPanel.classList.remove("hidden");
       if (mapPanel) mapPanel.classList.add("hidden");
 
-      // 3. Scroll to the "tool" element with a smooth deceleration effect
-      const toolElement = document.getElementById("tool");
+      // 3. Scroll to the "tabs" element with a smooth deceleration effect
+      const toolElement = document.getElementById("tabs");
       if (toolElement) {
-        // Calculate the target scroll position (top of the tool element relative to the document)
+        // Calculate the target scroll position (top of the tabs element relative to the document)
         const targetPosition = toolElement.getBoundingClientRect().top + window.scrollY;
         
         // Define a function that performs the smooth scrolling with deceleration
@@ -556,7 +556,11 @@ function renderSavedList() {
       </div>
       <div class="saved-item-actions">
         <button class="btn-compare" onclick="openCompareModal(${item.id})">Compare</button>
-        <button class="btn-delete" onclick="deleteSavedItem(${item.id})">🗑️</button>
+        <button class="btn-delete" onclick="deleteSavedItem(${item.id})" title="Delete">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="vertical-align: middle;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
       </div>
     `;
     container.appendChild(card);
