@@ -107,17 +107,41 @@ async function sendUserTurn(text) {
       const modelResultPanel = document.getElementById("modelResultPanel");
       const mapPanel = document.querySelector(".map-panel");
 
-      // Toggle the active state of the buttons to reflect the current view.
+      // 1. Update the button states
       if (showResultBtn) showResultBtn.classList.add("active");
       if (showMapBtn) showMapBtn.classList.remove("active");
 
-      // Show the results panel
+      // 2. Show the results panel
       if (chartSection) chartSection.classList.remove("hidden");
       if (modelResultPanel) modelResultPanel.classList.remove("hidden");
-
-      // Hide the map panel
       if (mapPanel) mapPanel.classList.add("hidden");
-      // ==========================================
+
+      // 3. Scroll to the "tool" element with a smooth deceleration effect
+      const toolElement = document.getElementById("tool");
+      if (toolElement) {
+        // Calculate the target scroll position (top of the tool element relative to the document)
+        const targetPosition = toolElement.getBoundingClientRect().top + window.scrollY;
+        
+        // Define a function that performs the smooth scrolling with deceleration
+        const easeOutScroll = () => {
+          const currentPosition = window.scrollY;
+          // Calculate the distance to the target position
+          const distance = targetPosition - currentPosition;
+          
+          // If the distance is small enough, scroll directly to the position and stop the animation
+          if (Math.abs(distance) < 1) {
+            window.scrollTo(0, targetPosition);
+            return;
+          }
+          
+          // Core deceleration formula: move 12% of the remaining distance each frame
+          // Large remaining distances result in faster movement, small remaining distances result in slower movement
+          window.scrollTo(0, currentPosition + distance * 0.12);
+          requestAnimationFrame(easeOutScroll);
+        };
+        
+        requestAnimationFrame(easeOutScroll);
+      }
     }
   } catch (error) {
     removeMessage(typing);
