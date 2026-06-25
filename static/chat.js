@@ -302,12 +302,16 @@ function renderMarketSharePie(result) {
 }
 
 function updateCompetitorsChart(competitors, candidatePredVisits) {
+  const placeholder = document.getElementById('chartPlaceholder1');
+  const canvas = document.getElementById('topCompetitorsChart');
   const section = document.getElementById("chartSection");
   if (!section) return;
 
   // Hide and tear down the chart if there is no data.
   if (!competitors || competitors.length === 0) {
     section.classList.add("hidden");
+    placeholder.style.display = 'flex';
+    canvas.style.zIndex = '0';
     if (competitorsChart) {
       competitorsChart.destroy();
       competitorsChart = null;
@@ -316,6 +320,8 @@ function updateCompetitorsChart(competitors, candidatePredVisits) {
   }
 
   section.classList.remove("hidden");
+  placeholder.style.display = 'none';
+  canvas.style.zIndex = '2';
 
   // Busiest competitor stores among the nearby set (by real historical visits/day).
   const top10 = [...competitors]
