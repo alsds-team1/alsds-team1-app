@@ -720,4 +720,60 @@ window.openCompareModal = function(savedId) {
       }
     }
   });
+
+  const tableContainer = document.getElementById('compareTableContainer');
+  const getDiffHtml = (current, saved, isSmallNumber = false) => {
+    const diff = current - saved;
+    const formattedDiff = isSmallNumber ? diff.toFixed(4) : diff.toFixed(1);
+    if (diff > 0) return `<span class="diff-positive">+${formattedDiff}</span>`;
+    if (diff < 0) return `<span class="diff-negative">${formattedDiff}</span>`;
+    return `<span class="diff-zero">0</span>`;
+  };
+
+  tableContainer.innerHTML = `
+    <div style="margin-bottom: 20px; font-size: 0.85rem; border-bottom: 1px solid var(--hairline); padding-bottom: 10px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div><strong>Category:</strong> ${current_huff_result.matched_category}</div>
+        <div><strong>Saved Category:</strong> ${savedItem.matched_category || 'N/A'}</div>
+        <div><strong>Current Loc:</strong> ${current_huff_result.candidate_lat.toFixed(4)}, ${current_huff_result.candidate_lon.toFixed(4)}</div>
+        <div><strong>Saved Loc:</strong> ${savedItem.candidate_lat.toFixed(4)}, ${savedItem.candidate_lon.toFixed(4)}</div>
+      </div>
+    </div>
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Metrics</th>
+          <th>Current Result</th>
+          <th>Saved Result</th>
+          <th>Difference</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Market Share</td>
+          <td>${Number(current_huff_result.market_share).toFixed(4)}</td>
+          <td>${Number(savedItem.market_share).toFixed(4)}</td>
+          <td>${getDiffHtml(current_huff_result.market_share, savedItem.market_share, true)}</td>
+        </tr>
+        <tr>
+          <td>Total Demand</td>
+          <td>${Number(current_huff_result.total_demand).toFixed(1)}</td>
+          <td>${Number(savedItem.total_demand).toFixed(1)}</td>
+          <td>${getDiffHtml(current_huff_result.total_demand, savedItem.total_demand)}</td>
+        </tr>
+        <tr>
+          <td>Predicted Visits</td>
+          <td>${Number(current_huff_result.predicted_visits).toFixed(1)}</td>
+          <td>${Number(savedItem.predicted_visits).toFixed(1)}</td>
+          <td>${getDiffHtml(current_huff_result.predicted_visits, savedItem.predicted_visits)}</td>
+        </tr>
+        <tr>
+          <td>Floor Area</td>
+          <td>${current_huff_result.floor_area}</td>
+          <td>${savedItem.floor_area}</td>
+          <td>${getDiffHtml(current_huff_result.floor_area, savedItem.floor_area)}</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
 };
