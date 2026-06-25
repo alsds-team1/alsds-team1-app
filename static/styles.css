@@ -315,6 +315,13 @@ th {
   display: inline-flex; align-items: center; gap: 10px; cursor: pointer;
   transition: transform .15s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
 }
+.als-btn svg {
+  display: block;
+  transition: stroke 0.2s;
+}
+.als-btn:hover svg {
+  stroke: currentColor; 
+}
 .als-btn-primary {
   background: var(--action); color: #fff;
   box-shadow: 0 10px 26px -12px rgba(37, 99, 235, 0.65);
@@ -672,4 +679,29 @@ th {
   overflow: hidden;
   clip: rect(0,0,0,0);
   border: 0;
+}
+
+/* this is a wrapper for the chart canvas and the placeholder message */
+.chart-container {
+  position: relative;
+}
+
+.chart-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--ground);
+  color: var(--body-soft);
+  border: 1px dashed var(--hairline);
+  z-index: 1;
+}
+
+canvas {
+  position: relative;
+  z-index: 0;
 }
