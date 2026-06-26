@@ -1,6 +1,6 @@
 # Spatial Intelligence Platform (SIP)
 
-### Randm: Jirapa, Zexuan, and Yixuan
+### Contributors: Jirapa, Zexuan, and Yixuan
 
 #### Web direction: https://alsds-team1-app-e3fed9azh2fpb4ej.eastus-01.azurewebsites.net/
 
