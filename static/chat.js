@@ -121,31 +121,18 @@ async function sendUserTurn(text) {
       if (modelResultPanel) modelResultPanel.classList.remove("hidden");
       if (mapPanel) mapPanel.classList.add("hidden");
 
-      // 3. Scroll to the "tabs" element with a smooth deceleration effect
+      // 3. Bring the results area into view ONCE.
+      //    NOTE: the previous version ran a requestAnimationFrame loop that called
+      //    window.scrollTo() every frame for ~2s until it was within 1px of the target.
+      //    While that loop was alive it re-asserted the scroll position on every frame,
+      //    so any attempt by the user to scroll down was immediately yanked back toward
+      //    the top — the "page jumps back to the top" bug. A single native smooth scroll
+      //    moves to the results once and then releases control, so the user can scroll
+      //    freely (and a user scroll gesture cancels it). block:"nearest" means it won't
+      //    move at all if the results are already on screen.
       const toolElement = document.getElementById("tabs");
       if (toolElement) {
-        // Calculate the target scroll position (top of the tabs element relative to the document)
-        const targetPosition = toolElement.getBoundingClientRect().top + window.scrollY;
-        
-        // Define a function that performs the smooth scrolling with deceleration
-        const easeOutScroll = () => {
-          const currentPosition = window.scrollY;
-          // Calculate the distance to the target position
-          const distance = targetPosition - currentPosition;
-          
-          // If the distance is small enough, scroll directly to the position and stop the animation
-          if (Math.abs(distance) < 1) {
-            window.scrollTo(0, targetPosition);
-            return;
-          }
-          
-          // Core deceleration formula: move 12% of the remaining distance each frame
-          // Large remaining distances result in faster movement, small remaining distances result in slower movement
-          window.scrollTo(0, currentPosition + distance * 0.05);
-          requestAnimationFrame(easeOutScroll);
-        };
-        
-        requestAnimationFrame(easeOutScroll);
+        toolElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }
     }
   } catch (error) {
